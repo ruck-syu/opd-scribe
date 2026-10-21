@@ -5,9 +5,22 @@ consultation, reviews the transcript, fills the structured note, and prints or s
 verifying it. Everything runs on the machine: no server, no telemetry, no auto-update, and no network
 code in the shipped app.
 
-Stack: Electron + React + TypeScript (electron-vite), `sql.js` with AES-256-GCM, Electron
+**Stack:** Electron + React + TypeScript (electron-vite), `sql.js` with AES-256-GCM, Electron
 `safeStorage`, whisper.cpp (`whisper-cli`) as a local speech sidecar, Chromium `printToPDF` + `pdf-lib`
 for PDFs.
+
+## Features
+
+- Patient records and visits, with a structured oncology note and prescription.
+- Consent-gated recording and dictation, transcribed locally; transcripts are reviewed before use.
+- Review flags that block verification (incomplete prescriptions, missing identity) or need an
+  acknowledgement (uncertain speech, unlabelled speakers, medicines outside the clinic formulary).
+  Acknowledgements are tied to the flagged content, so editing it raises the warning again.
+- Speech the transcriber missed is marked as `[untranscribed audio mm:ss-mm:ss]`, never dropped silently.
+- PIN-verified, revision-locked output; amendments create a new revision.
+- Built-in print layout with letterhead and calibration, or the clinic's own OPD format from an uploaded
+  sample.
+- Encrypted backup and restore, and an in-app audit log.
 
 ## Hard guardrails
 
@@ -25,6 +38,8 @@ These are product rules, not preferences. Keep them intact when changing code.
   PIN, resolves blocking flags, acknowledges warnings, and verifies the current content. The export gate
   then checks that the content hash still matches the verified revision; editing after verification
   revokes export.
+- **Flag, don't auto-correct.** Suspicious speech and unknown medicine names are flagged for the doctor;
+  text is never rewritten or silently deleted.
 - **Data is encrypted at rest.** The database, retained audio, the letterhead, and uploaded print-format
   samples are encrypted with AES-256-GCM. The data key is wrapped by the OS keystore through Electron
   `safeStorage` (DPAPI on Windows, Keychain on macOS). The only short-lived exception is the plain WAV
@@ -36,117 +51,42 @@ These are product rules, not preferences. Keep them intact when changing code.
 
 ## Requirements
 
-- Windows 10/11 x64 on the clinic laptop (developed on macOS).
-- Node.js 22 or newer for development. `package.json` has no `engines` field, so this is a practical
-  minimum, not an enforced one.
-- Allow about 500 MB for the app (the installer itself is around 120 MB), plus roughly 550 MB for the
-  baseline speech model. Allow 1-1.5 GB of RAM for a quantised model; 16 GB total is the target.
+- Windows 10/11 x64 on the clinic laptop (developed on macOS, which also runs the app).
+- Node.js 22 or newer for development (a practical minimum; `package.json` has no `engines` field).
+- About 500 MB for the app plus roughly 550 MB for the baseline speech model, and 1-1.5 GB of RAM for a
+  quantised model; 16 GB total is the target.
 - A microphone the doctor is comfortable speaking into.
 
-## Install and run (development)
+## Development
 
 ```bash
-cd /path/to/opd
 npm install
 npm run dev
 ```
 
-`npm run dev` starts electron-vite with the renderer dev server. If your macOS shell exports
-`ELECTRON_RUN_AS_NODE=1` (some editors do), Electron starts as plain Node and the window never opens.
-Launch with:
+If your macOS shell exports `ELECTRON_RUN_AS_NODE=1` (some editors do), Electron starts as plain Node and
+the window never opens. Launch with `env -u ELECTRON_RUN_AS_NODE npm run dev`.
 
-```bash
-env -u ELECTRON_RUN_AS_NODE npm run dev
-```
+| Command | What it does |
+| --- | --- |
+| `npm run typecheck` | TypeScript check |
+| `npm test` | Unit and integration tests (vitest) |
+| `npm run build` | Compile to `out/` without packaging |
+| `npm run icons` | Regenerate `build/icon.png` and `icon.ico` from `build/icon.svg` |
+| `npm run dist:win` | Windows NSIS installer in `release/` |
+| `npm run dist:mac` | macOS DMG (development only; not the clinic target) |
 
-Checks:
+## Windows installer
 
-```bash
-npm run typecheck
-npm test
-```
+`npm run dist:win` runs `electron-vite build` and then `electron-builder --win --x64`. The installer
+(for example `release/OPD Scribe Setup 0.1.0.exe`) is per-user, lets the user choose the install
+directory, and creates a desktop shortcut.
 
-`npm run build` produces the compiled app in `out/` without packaging an installer.
+It is **unsigned**, so Windows SmartScreen warns on first launch: choose **More info -> Run anyway**. If
+you distribute the file, publish a SHA-256 checksum alongside it.
 
-## Build the Windows installer (from a Mac)
-
-```bash
-npm run dist:win
-```
-
-This runs `electron-vite build` and then `electron-builder --win --x64`. The NSIS installer is written to
-`release/` (for example `release/OPD Scribe Setup 0.1.0.exe`). It is per-user, lets the user choose the
-install directory, and creates a desktop shortcut.
-
-The installer is **unsigned**, so Windows SmartScreen will warn on first launch: choose
-**More info -> Run anyway**. If you distribute the file, publish a SHA-256 checksum alongside it so the
-clinic can confirm it was not altered.
-
-Speech files are only bundled if they are present in `resources/whisper/` at build time
-(electron-builder copies that folder as an extra resource). Otherwise install them after setup as
-described in [docs/SPEECH_MODEL.md](docs/SPEECH_MODEL.md). Models are gitignored.
-
-`npm run dist:mac` builds a DMG for development on macOS; macOS is not the clinic target.
-
-## First run on the clinic laptop
-
-1. Install and launch the app. Windows may ask for microphone access; allow it (see the troubleshooting
-   section in `docs/SPEECH_MODEL.md`).
-2. Complete the setup wizard: clinic name and address, then the doctor's name, qualifications,
-   registration number, and a 4-8 digit PIN. This first doctor is the administrator and can verify
-   visits and change settings.
-3. Open **Settings** (visible to doctors) and walk through the sections:
-   - **Clinic & checklists** - clinic name/address/footer, toxicity and symptom checklists (one item per
-     line; every item starts as *Not assessed*), auto-lock minutes, and audio retention.
-   - **Letterhead & printing** - upload the printed letterhead as PDF, PNG, or JPG; set content margins
-     and X/Y calibration offsets; choose letterhead on every page or first page only, and one combined
-     PDF or two files. Use **Save & test print** and print the calibration page at 100% on the real
-     letterhead paper before the first clinic day.
-   - **OPD print format (custom format)** - the new feature: upload one of the clinic's existing note or
-     prescription samples (PDF, PNG, or JPG), then map patient fields and section blocks so output follows
-     that format. Preview it, then save. If no custom format is saved, the built-in format is used. Empty
-     or unmapped fields still print "Not documented"; verified revisions keep the format version they were
-     rendered with.
-   - **Speech recognition** - paths for `whisper-cli` and a `ggml-*.bin` model, language, CPU threads, and
-     a vocabulary hint. Press **Check** to confirm both files are found.
-   - **Users** - add Staff accounts for registration and drafting, and additional Doctor accounts. Each
-     user gets a PIN. Doctors can reset PINs and deactivate users.
-   - **Backup & restore** - create a passphrase-encrypted `.opdbackup` file and restore from one.
-   - **Audit log** - the latest 300 actions (logins, patient and summary changes, verification, export,
-     backup, settings).
-4. Set up speech following [docs/SPEECH_MODEL.md](docs/SPEECH_MODEL.md), then record a short test.
-5. Create the first encrypted backup and store it on a USB drive kept away from the laptop.
-
-## Where the data lives
-
-Electron's `userData` folder is `%APPDATA%\OPD Scribe` on Windows (typically
-`C:\Users\<user>\AppData\Roaming\OPD Scribe`). On macOS it is
-`~/Library/Application Support/OPD Scribe`.
-
-```text
-%APPDATA%\OPD Scribe\
-  opd.db.enc      encrypted SQLite database (patients, visits, revisions, audit, settings, blobs)
-  data.key        data key, encrypted with Windows DPAPI via Electron safeStorage
-  audio\          one encrypted WAV per transcript; deleted after review unless retention is on
-  tmp\            scratch files for speech recognition; recreated at startup
-  whisper\        optional whisper-cli.exe + DLLs + ggml model (not patient data)
-```
-
-The database file is the whole encrypted database, not a plain SQLite file. Copying it without
-`data.key` and the same Windows profile is not enough to read it.
-
-## Backup and recovery
-
-- Use **Settings > Backup & restore**. The passphrase must be at least 8 characters; without it the
-  backup cannot be opened. The file contains the database and any retained audio.
-- Restoring **replaces all data on the computer** and signs the user out. Restore is intended for a
-  replacement laptop or disaster recovery, not for merging two machines.
-- `data.key` is tied to the Windows user profile. Losing or recreating that profile (or deleting
-  `data.key`) makes the existing database unreadable even if the files are still there. Encrypted
-  backups are the recovery path, so take them regularly and test a restore before relying on them.
-- Keep backups offline (USB drive in a locked drawer). Enable BitLocker/device encryption on the
-  laptop, and keep the backup passphrase somewhere separate from the drive.
-- The audit log is append-only inside the app; it is not a substitute for backups.
+Speech files are bundled only if present in `resources/whisper/` at build time; otherwise install them
+after setup as described in [docs/SPEECH_MODEL.md](docs/SPEECH_MODEL.md). Models are gitignored.
 
 ## Project layout
 
@@ -160,10 +100,10 @@ The database file is the whole encrypted database, not a plain SQLite file. Copy
 
 ## Documentation
 
-- [docs/SPEECH_MODEL.md](docs/SPEECH_MODEL.md) - installing whisper.cpp, the Windows Vulkan build, and
-  the speech models on the clinic laptop.
+- [docs/CLINIC_GUIDE.md](docs/CLINIC_GUIDE.md) - first-run setup, recording consent, where data lives, backup and recovery.
+- [docs/SPEECH_MODEL.md](docs/SPEECH_MODEL.md) - whisper.cpp, the Windows Vulkan build, and the speech models.
 - [ROADMAP.md](ROADMAP.md) - delivery plan, clinical safety rules, and speech-engine decisions.
-- [docs/TASKS.md](docs/TASKS.md) - current open tasks and the custom OPD-format feature notes.
+- [docs/TASKS.md](docs/TASKS.md) - open tasks and what has been refined.
 
 ## Status and limitations
 
