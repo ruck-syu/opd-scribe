@@ -1,0 +1,99 @@
+name: Release
+
+# Every push to main (and every manual run) builds the Windows installer and the macOS DMGs and
+# publishes them as a GitHub release. The version is the latest v* tag with the patch number plus
+# one; the first release is v0.0.1. package.json is not edited: the version is injected at build time.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: next
+        run: |
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            next="0.0.1"
+          else
+            IFS=. read -r major minor patch <<< "${latest#v}"
+            next="$major.$minor.$((patch + 1))"
+          fi
+          echo "latest tag: ${latest:-none}, next: $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            command: npx electron-builder --win --x64
+            files: |
+              release/*.exe
+          - os: macos-latest
+            command: npx electron-builder --mac --arm64 --x64
+            files: |
+              release/*.dmg
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # builds are unsigned; skip certificate lookup
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx electron-vite build
+      - run: ${{ matrix.command }} -c.extraMetadata.version=${{ env.VERSION }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Checksums
+        working-directory: installers
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Publish release
+        run: |
+          gh release create "v$VERSION" installers/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --notes "Unsigned builds. Windows: SmartScreen shows a warning on first launch (More info, then Run anyway). macOS: right-click the app and choose Open the first time. Verify downloads against SHA256SUMS.txt."
