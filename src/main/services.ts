@@ -633,7 +633,7 @@ export class Services {
       'review.flags': (encounterId, patientId) => {
         this.requireUser()
         const e = this.encounterFor(encounterId, patientId)
-        return computeFlags(this.patient(patientId), e.document, s.listTranscripts(encounterId))
+        return computeFlags(this.patient(patientId), e.document, s.listTranscripts(encounterId), s.getSettings().formulary)
       },
       'review.preview': async (encounterId, patientId) => {
         const u = this.requireUser()
@@ -656,7 +656,7 @@ export class Services {
         this.checkPin(doctor.id, pin)
         const e = this.encounterFor(encounterId, patientId)
         if (e.status === 'verified' || e.status === 'amended') fail('Already verified')
-        const flags = computeFlags(this.patient(patientId), e.document, s.listTranscripts(encounterId))
+        const flags = computeFlags(this.patient(patientId), e.document, s.listTranscripts(encounterId), s.getSettings().formulary)
         if (!canVerify(flags, e.document.acknowledgedFlags))
           fail('Resolve all blocking issues and acknowledge all warnings before verifying')
         const snap = this.snapshot(e, doctor)

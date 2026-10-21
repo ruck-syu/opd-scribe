@@ -120,7 +120,7 @@ export interface VisitDocument {
     returnPrecautions: TextSection
     followUp: TextSection
   }
-  /** ids of warnings the doctor explicitly acknowledged for the current content */
+  /** ack keys (not ids) of warnings the doctor explicitly acknowledged for the current content */
   acknowledgedFlags: string[]
 }
 
@@ -245,7 +245,9 @@ export interface VerifiedSnapshot {
 // ---------- Flags ----------
 
 export interface ReviewFlag {
-  id: string // stable for the same issue, used for acknowledgement
+  id: string // stable for the same issue
+  /** id + '#' + content fingerprint; an acknowledgement only holds for this exact content */
+  ackKey: string
   severity: 'blocking' | 'warning'
   area: 'identity' | 'history' | 'transcript' | 'dictation' | 'oncology' | 'note' | 'prescription'
   message: string
@@ -290,6 +292,8 @@ export interface AppSettings {
   autoLockMinutes: number
   toxicityChecklist: string[]
   symptomChecklist: string[]
+  /** clinic formulary; used only to flag possible misspellings, never to change a prescription */
+  formulary: string[]
   /** letterhead file stored encrypted in app data; only its type is in settings */
   letterheadType: '' | 'pdf' | 'png' | 'jpg'
   /** custom print formats built from an uploaded sample; null = built-in format */

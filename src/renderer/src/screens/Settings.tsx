@@ -76,6 +76,7 @@ function ClinicSection({ settings, save, busy }: SectionProps): ReactNode {
   const [clinic, setClinic] = useState(settings.clinic)
   const [tox, setTox] = useState(settings.toxicityChecklist.join('\n'))
   const [sym, setSym] = useState(settings.symptomChecklist.join('\n'))
+  const [formulary, setFormulary] = useState(settings.formulary.join('\n'))
   const [lockMin, setLockMin] = useState(String(settings.autoLockMinutes))
   const [retain, setRetain] = useState(settings.retainAudio)
   return (
@@ -90,6 +91,9 @@ function ClinicSection({ settings, save, busy }: SectionProps): ReactNode {
         <Area label="Toxicity checklist" rows={8} value={tox} onChange={setTox} />
         <Area label="Symptom checklist" rows={8} value={sym} onChange={setSym} />
       </div>
+      <h3>Clinic formulary</h3>
+      <p className="muted small">Used only to flag possible misspellings. Leave empty to turn off.</p>
+      <Area label="Clinic formulary (one medicine per line)" rows={8} value={formulary} onChange={setFormulary} />
       <h3>Privacy</h3>
       <Field label="Auto-lock after idle minutes (0 = off)" type="number" width={260} value={lockMin} onChange={setLockMin} />
       <label className="check">
@@ -105,6 +109,7 @@ function ClinicSection({ settings, save, busy }: SectionProps): ReactNode {
               clinic,
               toxicityChecklist: lines(tox),
               symptomChecklist: lines(sym),
+              formulary: lines(formulary),
               autoLockMinutes: Math.max(0, Math.floor(Number(lockMin) || 0)),
               retainAudio: retain
             })

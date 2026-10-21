@@ -81,6 +81,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoLockMinutes: 10,
   toxicityChecklist: DEFAULT_TOXICITIES,
   symptomChecklist: DEFAULT_SYMPTOMS,
+  formulary: [],
   letterheadType: '',
   formats: { note: null, prescription: null }
 }

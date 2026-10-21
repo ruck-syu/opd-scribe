@@ -41,10 +41,10 @@ export function ReviewTab(props: {
   const warnings = flags ? flags.filter((f) => f.severity === 'warning') : []
   const ready = flags !== null && canVerify(flags, ctx.doc.acknowledgedFlags)
 
-  const toggleAck = (id: string, on: boolean): void =>
+  const toggleAck = (key: string, on: boolean): void =>
     ctx.update((d) => ({
       ...d,
-      acknowledgedFlags: on ? [...new Set([...d.acknowledgedFlags, id])] : d.acknowledgedFlags.filter((x) => x !== id)
+      acknowledgedFlags: on ? [...new Set([...d.acknowledgedFlags, key])] : d.acknowledgedFlags.filter((x) => x !== key)
     }))
 
   return (
@@ -84,7 +84,7 @@ export function ReviewTab(props: {
                 {warnings.map((f) => (
                   <li key={f.id} className="flag warning">
                     <label className="check">
-                      <input type="checkbox" checked={acked.has(f.id)} onChange={(e) => toggleAck(f.id, e.target.checked)} />
+                      <input type="checkbox" checked={acked.has(f.ackKey)} onChange={(e) => toggleAck(f.ackKey, e.target.checked)} />
                       <span className="pill warn">{f.area}</span> {f.message}
                     </label>
                   </li>
