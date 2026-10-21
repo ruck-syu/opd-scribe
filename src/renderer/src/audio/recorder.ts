@@ -9,11 +9,17 @@ export class PcmRecorder {
   private node: ScriptProcessorNode | null = null
   private chunks: Int16Array[] = []
   private samples = 0
+  private released = false
+  private interrupted = false
   paused = false
   level = 0
   readonly sampleRate = 16000
+  /** Called once when the mic disappears or the audio context closes underneath us. */
+  onInterrupted?: (reason: string) => void
 
   async start(deviceId?: string): Promise<void> {
+    this.released = false
+    this.interrupted = false
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
@@ -23,7 +29,14 @@ export class PcmRecorder {
         autoGainControl: true
       }
     })
+    for (const track of this.stream.getAudioTracks()) {
+      track.addEventListener('ended', () => this.notifyInterrupted('Microphone disconnected'))
+    }
     this.ctx = new AudioContext({ sampleRate: this.sampleRate })
+    this.ctx.onstatechange = () => {
+      const state = this.ctx?.state as string | undefined
+      if (state === 'closed' || state === 'interrupted') this.notifyInterrupted('Microphone disconnected')
+    }
     const src = this.ctx.createMediaStreamSource(this.stream)
     this.node = this.ctx.createScriptProcessor(4096, 1, 1)
     this.node.onaudioprocess = (ev) => {
@@ -48,26 +61,53 @@ export class PcmRecorder {
     return (this.samples / this.sampleRate) * 1000
   }
 
-  async stop(): Promise<{ wav: ArrayBuffer; durationMs: number }> {
-    this.node?.disconnect()
+  /** Fire the interruption callback at most once, and never for our own teardown. */
+  private notifyInterrupted(reason: string): void {
+    if (this.interrupted || this.released) return
+    this.interrupted = true
+    this.onInterrupted?.(reason)
+  }
+
+  /** Release the mic / audio graph exactly once. */
+  private release(): void {
+    if (this.released) return
+    this.released = true
+    if (this.node) {
+      this.node.onaudioprocess = null
+      this.node.disconnect()
+      this.node = null
+    }
     this.stream?.getTracks().forEach((t) => t.stop())
-    await this.ctx?.close()
+    this.stream = null
+    const ctx = this.ctx
+    this.ctx = null
+    if (ctx) {
+      ctx.onstatechange = null
+      void ctx.close().catch(() => undefined)
+    }
+  }
+
+  /** Idempotent: a second call returns an empty WAV instead of throwing. */
+  async stop(): Promise<{ wav: ArrayBuffer; durationMs: number }> {
     const out = { wav: encodeWav(this.chunks, this.samples, this.sampleRate), durationMs: this.durationMs }
+    this.release()
     this.chunks = []
     this.samples = 0
+    this.paused = false
     return out
   }
 
+  /** Idempotent: safe to call after stop() or more than once. */
   async cancel(): Promise<void> {
-    this.node?.disconnect()
-    this.stream?.getTracks().forEach((t) => t.stop())
-    await this.ctx?.close()
+    this.release()
     this.chunks = []
     this.samples = 0
+    this.paused = false
   }
 }
 
-function encodeWav(chunks: Int16Array[], samples: number, rate: number): ArrayBuffer {
+/** Exported for the WAV header tests; no browser APIs are used. */
+export function encodeWav(chunks: Int16Array[], samples: number, rate: number): ArrayBuffer {
   const buf = new ArrayBuffer(44 + samples * 2)
   const v = new DataView(buf)
   const str = (o: number, s: string): void => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)))

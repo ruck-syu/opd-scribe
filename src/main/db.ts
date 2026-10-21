@@ -513,4 +513,9 @@ export class Store {
       detail: String(r.detail)
     }))
   }
+
+  /** True when an audit entry exists for this exact action on this entity. */
+  hasAudit(action: string, entityId: string): boolean {
+    return !!this.get(`SELECT 1 AS x FROM audit WHERE action = ? AND entity_id = ? LIMIT 1`, [action, entityId])
+  }
 }

@@ -120,6 +120,9 @@ export interface ApiMap {
   'encounters.save': (encounterId: string, patientId: string, doc: VisitDocument) => Encounter
   'encounters.startAmendment': (encounterId: string, patientId: string, reason: string) => Encounter
   'encounters.revisions': (encounterId: string, patientId: string) => Revision[]
+  /** audit-only record that the patient agreed to this consultation being recorded */
+  'encounters.recordConsent': (encounterId: string, patientId: string) => void
+  'encounters.consent': (encounterId: string, patientId: string) => boolean
 
   'transcripts.list': (encounterId: string, patientId: string) => Transcript[]
   'transcripts.transcribe': (input: TranscribeInput) => Transcript
@@ -178,6 +181,8 @@ export const CHANNELS = [
   'encounters.save',
   'encounters.startAmendment',
   'encounters.revisions',
+  'encounters.recordConsent',
+  'encounters.consent',
   'transcripts.list',
   'transcripts.transcribe',
   'transcripts.retry',

@@ -21,8 +21,8 @@ export function ConversationTab({ ctx }: { ctx: VisitCtx }): ReactNode {
       <AsrStatus />
       <div className="card">
         <p className="muted small">
-          Ask the patient for consent before recording. Speakers are not detected automatically — label each segment
-          (select several and use “Label as”). Nothing is added to the note until you insert it.
+          Speakers are not detected automatically — label each segment (select several and use “Label as”). Nothing is
+          added to the note until you insert it.
         </p>
         <RecorderPanel
           encounterId={ctx.encounterId}
@@ -30,6 +30,7 @@ export function ConversationTab({ ctx }: { ctx: VisitCtx }): ReactNode {
           kind="conversation"
           label="Record consultation"
           disabled={ctx.readOnly}
+          requireConsent
           onSubmitted={ctx.reloadTranscripts}
         />
       </div>

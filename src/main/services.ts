@@ -562,12 +562,24 @@ export class Services {
         return s.updateEncounter({ ...e, status: 'amending', amendmentReason: reason.trim(), document: { ...e.document, acknowledgedFlags: [] } })
       },
       'encounters.revisions': (encounterId, patientId) => (this.requireUser(), this.encounterFor(encounterId, patientId), s.listRevisions(encounterId)),
+      'encounters.recordConsent': (encounterId, patientId) => {
+        this.requireUser()
+        this.encounterFor(encounterId, patientId)
+        this.audit('consent.recording', 'encounter', encounterId)
+      },
+      'encounters.consent': (encounterId, patientId) => {
+        this.requireUser()
+        this.encounterFor(encounterId, patientId)
+        return s.hasAudit('consent.recording', encounterId)
+      },
 
       'transcripts.list': (encounterId, patientId) => (this.requireUser(), this.encounterFor(encounterId, patientId), s.listTranscripts(encounterId)),
       'transcripts.transcribe': (input) => {
         this.requireUser()
         const e = this.encounterFor(input.encounterId, input.patientId)
         if (e.status === 'verified' || e.status === 'amended') fail('Verified visit is locked — start an amendment first')
+        if (input.kind === 'conversation' && !s.hasAudit('consent.recording', e.id))
+          fail("Record the patient's consent before recording the consultation")
         if (input.kind === 'dictation' && !input.section) fail('Dictation needs a target section')
         const wav = Buffer.from(input.wav)
         if (wav.length < 44 || wav.subarray(0, 4).toString('ascii') !== 'RIFF') fail('Invalid audio')

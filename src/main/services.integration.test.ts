@@ -460,3 +460,85 @@ describe('PHI hygiene (AC-18)', () => {
     expect(output).not.toContain(PHI_MRN)
   })
 })
+
+describe('consultation recording consent', () => {
+  /** Minimal RIFF header: enough for the handler's audio sanity check. */
+  const riff = (): ArrayBuffer => {
+    const wav = new ArrayBuffer(64)
+    new Uint8Array(wav).set([0x52, 0x49, 0x46, 0x46])
+    return wav
+  }
+
+  /** Run transcribe and return its error message (empty string when it was accepted). */
+  const transcribe = async (
+    patient: Patient,
+    encounter: Encounter,
+    kind: 'conversation' | 'dictation'
+  ): Promise<string> => {
+    try {
+      await call(h.handlers, 'transcripts.transcribe', {
+        encounterId: encounter.id,
+        patientId: patient.id,
+        kind,
+        section: kind === 'dictation' ? 'plan' : null,
+        wav: riff(),
+        durationMs: 1000
+      })
+      return ''
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  it('rejects a consultation recording until consent is recorded', async () => {
+    const { patient, encounter } = await startSession()
+    expect(await call(h.handlers, 'encounters.consent', encounter.id, patient.id)).toBe(false)
+
+    await expect(
+      call(h.handlers, 'transcripts.transcribe', {
+        encounterId: encounter.id,
+        patientId: patient.id,
+        kind: 'conversation',
+        section: null,
+        wav: riff(),
+        durationMs: 1000
+      })
+    ).rejects.toThrow(/Record the patient's consent before recording the consultation/)
+
+    // Nothing was written: no transcript row was created for the rejected audio.
+    expect(await call(h.handlers, 'transcripts.list', encounter.id, patient.id)).toHaveLength(0)
+  })
+
+  it('does not block dictation on consultation consent', async () => {
+    const { patient, encounter } = await startSession()
+    const error = await transcribe(patient, encounter, 'dictation')
+    expect(error).not.toMatch(/consent/i)
+  })
+
+  it('allows consultation recordings once consent is recorded', async () => {
+    const { patient, encounter } = await startSession()
+    await call(h.handlers, 'encounters.recordConsent', encounter.id, patient.id)
+
+    expect(await call(h.handlers, 'encounters.consent', encounter.id, patient.id)).toBe(true)
+    const error = await transcribe(patient, encounter, 'conversation')
+    expect(error).not.toMatch(/consent/i)
+  })
+
+  it('rejects consent for a patient that does not own the visit, and keeps PHI out of the audit', async () => {
+    const { patient, encounter } = await startSession()
+    const other = await createPatient('OTHER-CONSENT', 'Other Patient')
+
+    await expect(call(h.handlers, 'encounters.recordConsent', encounter.id, other.id)).rejects.toThrow(
+      /Patient \/ visit mismatch/
+    )
+
+    await call(h.handlers, 'encounters.recordConsent', encounter.id, patient.id)
+    const entry = (await call(h.handlers, 'audit.list', 1000)).find((e) => e.action === 'consent.recording')
+    expect(entry).toBeDefined()
+    expect(entry!.entity).toBe('encounter')
+    expect(entry!.entityId).toBe(encounter.id)
+    expect(entry!.detail).toBe('')
+    expect(JSON.stringify(entry)).not.toContain(PHI_NAME)
+  })
+})
+
