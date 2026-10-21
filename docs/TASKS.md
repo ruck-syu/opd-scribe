@@ -1,6 +1,6 @@
 # OPD Scribe — open tasks (post-MVP)
 
-Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced (predates the custom print format — rebuild with `npm run dist:win`). Typecheck clean, 58/58 tests, E2E smoke + custom-format E2E passed on macOS.
+Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced. Typecheck clean, 58/58 tests, E2E smoke + custom-format E2E passed on macOS.
 
 ## Needs the user / the Ryzen laptop
 - [ ] Install `release/OPD Scribe Setup 0.1.0.exe` on the Ryzen laptop (unsigned → SmartScreen: "More info → Run anyway").
@@ -15,7 +15,7 @@ Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced (predates the c
 - [x] `docs/SPEECH_MODEL.md`: Windows whisper.cpp Vulkan build, Apex → ggml conversion, large-v3-turbo fallback.
 - [x] README: run / build / install.
 - [ ] App icon.
-- [ ] Rebuild the Windows installer with the custom print format.
+- [x] Rebuild the Windows installer with the custom print format.
 - [x] `git init` + first commit.
 
 ## Optional hardening
