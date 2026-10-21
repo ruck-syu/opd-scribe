@@ -4,11 +4,13 @@ import type { AsrCheck, PreviewResult } from '../../../shared/api'
 import type { AppSettings, AuditEntry, LayoutSettings, Role, User } from '../../../shared/types'
 import { Area, ErrorBox, Field, Modal, Select, fmtDateTime, useAction } from '../components/ui'
 import { PdfPreview } from '../components/PdfPreview'
+import { FormatSection } from './FormatEditor'
 
-type Section = 'clinic' | 'print' | 'speech' | 'users' | 'data' | 'audit'
+type Section = 'clinic' | 'print' | 'format' | 'speech' | 'users' | 'data' | 'audit'
 const SECTIONS: [Section, string][] = [
   ['clinic', 'Clinic & checklists'],
   ['print', 'Letterhead & printing'],
+  ['format', 'OPD print format'],
   ['speech', 'Speech recognition'],
   ['users', 'Users'],
   ['data', 'Backup & restore'],
@@ -49,7 +51,10 @@ export function Settings({ user, onRestored }: { user: User; onRestored: () => v
       <ErrorBox error={error} />
       <div className="tab-body">
         {section === 'clinic' && <ClinicSection settings={settings} save={save} busy={busy} />}
-        {section === 'print' && <PrintSection settings={settings} setSettings={setSettings} save={save} busy={busy} />}
+        {section === 'print' && (
+          <PrintSection settings={settings} setSettings={setSettings} save={save} busy={busy} onOpenFormats={() => setSection('format')} />
+        )}
+        {section === 'format' && <FormatSection settings={settings} setSettings={setSettings} busy={busy} role={user.role} />}
         {section === 'speech' && <SpeechSection settings={settings} save={save} busy={busy} />}
         {section === 'users' && <UsersSection me={user} />}
         {section === 'data' && <DataSection onRestored={onRestored} />}
@@ -122,11 +127,18 @@ const MM: [keyof LayoutSettings, string][] = [
   ['fontSizePt', 'Font size (pt)']
 ]
 
-function PrintSection({ settings, setSettings, save, busy }: SectionProps & { setSettings: (s: AppSettings) => void }): ReactNode {
+function PrintSection({
+  settings,
+  setSettings,
+  save,
+  busy,
+  onOpenFormats
+}: SectionProps & { setSettings: (s: AppSettings) => void; onOpenFormats: () => void }): ReactNode {
   const [layout, setLayout] = useState(settings.layout)
   const [nums, setNums] = useState<Record<string, string>>(() => Object.fromEntries(MM.map(([k]) => [k, String(settings.layout[k])])))
   const [test, setTest] = useState<PreviewResult | null>(null)
   const { busy: b2, error, run } = useAction()
+  const custom = (['note', 'prescription'] as const).filter((k) => settings.formats[k] !== null)
 
   const parsed = (): LayoutSettings => {
     const next = { ...layout } as Record<string, unknown>
@@ -140,6 +152,13 @@ function PrintSection({ settings, setSettings, save, busy }: SectionProps & { se
 
   return (
     <div className="card">
+      <p className="muted small">
+        Using your own OPD sheet? Set it up under{' '}
+        <button type="button" className="link-btn" onClick={onOpenFormats}>
+          OPD print format
+        </button>
+        .{custom.length > 0 && ` Custom format active for: ${custom.join(' / ')}.`}
+      </p>
       <h3>Letterhead</h3>
       <p className="muted small">
         Upload your printed letterhead as PDF, PNG or JPG (A4). Content is placed inside the margins below so it never overlaps the header

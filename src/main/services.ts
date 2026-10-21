@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
+import { PDFDocument } from 'pdf-lib'
 import type { ApiMap, Channel, PreviewResult } from '../shared/api'
 import { canonicalJson, clinicalContent } from '../shared/canonical'
 import { emptyDocument, uid } from '../shared/defaults'
 import { canVerify, computeFlags } from '../shared/flags'
+import { renderFormBodyHtml, renderFieldsOverlayHtml, sampleSnapshot } from '../shared/formRender'
+import { A4_MM, validateTemplate, type DocKind, type FormTemplate } from '../shared/formTemplate'
 import { renderNoteHtml, renderPrescriptionHtml } from '../shared/pdfTemplates'
 import type {
   AppSettings,
@@ -23,7 +26,7 @@ import { createBackup, readBackup } from './backup'
 import { hashPin, readEncrypted, verifyPin, writeEncrypted } from './crypto'
 import { parsePatientCsv } from './csvImport'
 import type { Store } from './db'
-import { calibrationHtml, composePdf, concatPdfs, type Letterhead } from './pdfCompose'
+import { calibrationHtml, composePdf, concatPdfs, mmToPt, type Letterhead } from './pdfCompose'
 
 /** Electron-specific capabilities, injected so services stay testable. */
 export interface Platform {
@@ -52,9 +55,23 @@ const localNow = (): string => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+/** Sample blobs are identified by content, never by the file extension. */
+function sampleBlobType(data: Uint8Array): 'pdf' | 'png' | 'jpg' | null {
+  if (data.length >= 4 && data[0] === 0x25 && data[1] === 0x50 && data[2] === 0x44 && data[3] === 0x46) return 'pdf'
+  if (data.length >= 8 && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) return 'png'
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'jpg'
+  return null
+}
+
+const SAMPLE_MAX_BYTES = 15 * 1024 * 1024
+const round1 = (n: number): number => Math.round(n * 10) / 10
+
 export function contentHash(snap: VerifiedSnapshot): string {
+  // Print formats are presentation, not clinical content: editing them never invalidates
+  // a verification, and legacy snapshots without formats hash exactly as before.
+  const { formats: _formats, ...rest } = snap
   return createHash('sha256')
-    .update(canonicalJson({ ...snap, document: clinicalContent(snap.document) }))
+    .update(canonicalJson({ ...rest, document: clinicalContent(snap.document) }))
     .digest('hex')
 }
 
@@ -158,11 +175,13 @@ export class Services {
   // ---------- documents / PDF ----------
 
   private snapshot(e: Encounter, doctor: Pick<User, 'name' | 'registrationNo' | 'qualifications'>): VerifiedSnapshot {
+    const settings = this.store.getSettings()
     return {
       patient: this.patient(e.patientId),
       document: e.document,
       doctor: { name: doctor.name, registrationNo: doctor.registrationNo, qualifications: doctor.qualifications },
-      clinic: this.store.getSettings().clinic
+      clinic: settings.clinic,
+      formats: settings.formats
     }
   }
 
@@ -171,23 +190,60 @@ export class Services {
     return data && settings.letterheadType ? { type: settings.letterheadType, data: new Uint8Array(data) } : null
   }
 
-  private async renderPdfs(snap: VerifiedSnapshot, draft: boolean): Promise<PreviewResult> {
-    const settings = this.store.getSettings()
-    const lh = this.letterhead(settings)
+  private sample(sampleId: string): Letterhead | null {
+    if (!sampleId) return null
+    const data = this.store.getBlob(`format-sample-${sampleId}`)
+    if (!data) return null
+    const type = sampleBlobType(data)
+    return type ? { type, data: new Uint8Array(data) } : null
+  }
+
+  /** Built-in format when `template` is null; otherwise the doctor's own layout. */
+  private async renderKind(
+    kind: DocKind,
+    snap: VerifiedSnapshot,
+    draft: boolean,
+    template: FormTemplate | null,
+    settings: AppSettings
+  ): Promise<Uint8Array> {
+    const label =
+      kind === 'note' ? (draft ? 'DRAFT OPD Visit Note' : 'OPD Visit Note') : draft ? 'DRAFT Prescription & Plan' : 'Prescription & Plan'
     const p = snap.patient
     const identity = `${p.name} | MRN ${p.mrn} | Visit ${snap.document.visitDateTime.replace('T', ' ')}`
-    const note = await composePdf(
-      await this.platform.htmlToPdf(renderNoteHtml(snap, settings.layout, { draft, clinicHeader: !settings.letterheadType })),
-      settings.layout,
-      lh,
-      { identity, label: draft ? 'DRAFT OPD Visit Note' : 'OPD Visit Note' }
-    )
-    const rx = await composePdf(
-      await this.platform.htmlToPdf(renderPrescriptionHtml(snap, settings.layout, { draft, clinicHeader: !settings.letterheadType })),
-      settings.layout,
-      lh,
-      { identity, label: draft ? 'DRAFT Prescription & Plan' : 'Prescription & Plan' }
-    )
+
+    if (!template) {
+      const opts = { draft, clinicHeader: !settings.letterheadType }
+      const html = kind === 'note' ? renderNoteHtml(snap, settings.layout, opts) : renderPrescriptionHtml(snap, settings.layout, opts)
+      return composePdf(await this.platform.htmlToPdf(html), settings.layout, this.letterhead(settings), { identity, label })
+    }
+
+    const body = await this.platform.htmlToPdf(renderFormBodyHtml(snap, template, { draft }))
+    const pageCount = (await PDFDocument.load(body)).getPageCount()
+    const overlay =
+      template.fields.length === 0
+        ? null
+        : await this.platform.htmlToPdf(renderFieldsOverlayHtml(snap, template, pageCount))
+    const background =
+      template.background === 'sample'
+        ? (this.sample(template.sampleId) ?? fail('Sample file is missing — upload it again'))
+        : template.background === 'letterhead'
+          ? this.letterhead(settings)
+          : null
+    return composePdf(body, settings.layout, background, { identity, label }, {
+      pageSize: { width: mmToPt(template.pageWidthMm), height: mmToPt(template.pageHeightMm) },
+      backgrounds: { first: background, next: template.repeatBackground ? background : null },
+      overlay,
+      stampLeftMm: template.bodyNext.xMm,
+      stampRightMm: template.pageWidthMm - template.bodyNext.xMm - template.bodyNext.wMm,
+      stampBottomMm: 4
+    })
+  }
+
+  private async renderPdfs(snap: VerifiedSnapshot, draft: boolean): Promise<PreviewResult> {
+    const settings = this.store.getSettings()
+    const formats = snap.formats ?? settings.formats
+    const note = await this.renderKind('note', snap, draft, formats.note, settings)
+    const rx = await this.renderKind('prescription', snap, draft, formats.prescription, settings)
     const pdfs = settings.layout.combinedPdf
       ? [{ name: 'visit', data: await concatPdfs([note, rx]) }]
       : [
@@ -313,7 +369,8 @@ export class Services {
           clinic: { ...cur.clinic, ...patch.clinic },
           layout: { ...cur.layout, ...patch.layout },
           asr: { ...cur.asr, ...patch.asr },
-          letterheadType: cur.letterheadType
+          letterheadType: cur.letterheadType,
+          formats: cur.formats
         }
         s.saveSettings(next)
         this.audit('settings.update', 'settings', 'app', Object.keys(patch).join(','))
@@ -352,6 +409,83 @@ export class Services {
       },
       'settings.checkAsr': () => (this.requireUser(), checkAsr(resolveAsr(s.getSettings().asr, this.platform.whisperDirs))),
       'settings.pickFile': (title, extensions) => (this.requireDoctor(), this.platform.openFile(title, extensions)),
+
+      'formats.uploadSample': async (kind) => {
+        this.requireDoctor()
+        const what = kind === 'note' ? 'note' : 'prescription'
+        const path = await this.platform.openFile(`Choose a sample OPD ${what}`, ['pdf', 'png', 'jpg', 'jpeg'])
+        if (!path) return null
+        const ext = extname(path).toLowerCase().replace('.', '')
+        const type = ext === 'jpeg' ? 'jpg' : ext
+        if (type !== 'pdf' && type !== 'png' && type !== 'jpg') return fail('Sample must be a PDF, PNG or JPG')
+        if (statSync(path).size > SAMPLE_MAX_BYTES) fail('Sample must be 15 MB or smaller')
+        const data = readFileSync(path)
+        const sniffed = sampleBlobType(data)
+        if (!sniffed || sniffed !== type) fail('Sample file does not match its file type')
+
+        let pageWidthMm = A4_MM.w
+        let pageHeightMm = A4_MM.h
+        if (type === 'pdf') {
+          try {
+            const doc = await PDFDocument.load(data)
+            const { width, height } = doc.getPage(0).getSize()
+            pageWidthMm = round1((width * 25.4) / 72)
+            pageHeightMm = round1((height * 25.4) / 72)
+          } catch {
+            fail('Could not read this PDF')
+          }
+        }
+
+        // Samples are never overwritten or deleted: verified revisions still reference them.
+        const sampleId = uid()
+        this.store.setBlob(`format-sample-${sampleId}`, data)
+        this.audit('formats.sample', 'settings', kind, type)
+        return { sampleId, sampleType: type, pageWidthMm, pageHeightMm }
+      },
+      'formats.sample': (sampleId) => {
+        this.requireUser()
+        if (!/^[0-9a-f-]{36}$/.test(sampleId)) fail('Invalid sample id')
+        const data = this.store.getBlob(`format-sample-${sampleId}`)
+        if (!data) return null
+        const type = sampleBlobType(data)
+        if (!type) return fail('Unrecognised sample file')
+        return { type, data: new Uint8Array(data) }
+      },
+      'formats.save': (kind, template) => {
+        this.requireDoctor()
+        const cur = s.getSettings()
+        if (!template) {
+          const next: AppSettings = { ...cur, formats: { ...cur.formats, [kind]: null } }
+          s.saveSettings(next)
+          this.audit('formats.save', 'settings', kind, 'built-in')
+          return next
+        }
+        if (template.kind !== kind) fail('Format kind does not match the document')
+        const errors = validateTemplate(template)
+        if (errors.length > 0) fail(errors.join('; '))
+        if (template.background === 'sample' && !s.getBlob(`format-sample-${template.sampleId}`))
+          fail('Sample file is missing — upload it again')
+        const current = cur.formats[kind]
+        const version = (current?.version ?? 0) + 1
+        const saved: FormTemplate = {
+          ...template,
+          id: current?.id || template.id || uid(),
+          version,
+          updatedAt: nowIso()
+        }
+        const next: AppSettings = { ...cur, formats: { ...cur.formats, [kind]: saved } }
+        s.saveSettings(next)
+        this.audit('formats.save', 'settings', kind, `v${version}`)
+        return next
+      },
+      'formats.preview': async (template) => {
+        this.requireUser()
+        const errors = validateTemplate(template)
+        if (errors.length > 0) fail(errors.join('; '))
+        const settings = s.getSettings()
+        const pdf = await this.renderKind(template.kind, sampleSnapshot(settings.clinic), true, template, settings)
+        return { pdfs: [{ name: template.kind, data: pdf }], draft: true }
+      },
 
       'patients.search': (q) => (this.requireUser(), s.searchPatients(q)),
       'patients.get': (id) => (this.requireUser(), this.patient(id)),

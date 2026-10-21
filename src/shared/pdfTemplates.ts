@@ -1,4 +1,5 @@
 import { NOT_DOCUMENTED } from './defaults'
+import type { SectionKey } from './formTemplate'
 import type {
   Finding,
   FindingState,
@@ -19,7 +20,7 @@ export interface RenderOptions {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DRAFT_TEXT = 'UNVERIFIED DRAFT — NOT FOR CLINICAL USE'
 
-const isBlank = (s: string): boolean => s.trim() === ''
+export const isBlank = (s: string): boolean => s.trim() === ''
 
 const nd = (): string => `<span class="nd">${escapeHtml(NOT_DOCUMENTED)}</span>`
 
@@ -37,16 +38,32 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function formatVisitDateTime(raw: string): string {
-  if (isBlank(raw)) return nd()
+/** Plain-text date for fixed fields, e.g. "21 Oct 2026". */
+export function formatDateText(raw: string): string {
+  if (isBlank(raw)) return NOT_DOCUMENTED
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw.trim())
+  if (!m) return raw.trim()
+  const month = MONTHS[Number(m[2]) - 1]
+  const day = Number(m[3])
+  if (!month || day < 1 || day > 31) return raw.trim()
+  return `${day} ${month} ${m[1]}`
+}
+
+/** Plain-text date & time for fixed fields, e.g. "21 Oct 2026, 14:05". */
+export function formatVisitDateTimeText(raw: string): string {
+  if (isBlank(raw)) return NOT_DOCUMENTED
   const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(raw.trim())
-  if (!m) return escapeHtml(raw)
+  if (!m) return raw.trim()
   const month = MONTHS[Number(m[2]) - 1]
   const day = Number(m[3])
   const hour = Number(m[4])
   const minute = Number(m[5])
-  if (!month || day < 1 || day > 31 || hour > 23 || minute > 59) return escapeHtml(raw)
+  if (!month || day < 1 || day > 31 || hour > 23 || minute > 59) return raw.trim()
   return `${day} ${month} ${m[1]}, ${m[4]}:${m[5]}`
+}
+
+function formatVisitDateTime(raw: string): string {
+  return isBlank(raw) ? nd() : escapeHtml(formatVisitDateTimeText(raw))
 }
 
 function heading(tag: 'h1' | 'h2' | 'h3', label: string): string {
@@ -77,8 +94,14 @@ function textBody(text: string): string {
   return isBlank(text) ? `<p class="nd">${escapeHtml(NOT_DOCUMENTED)}</p>` : `<div class="text">${escapeHtml(text)}</div>`
 }
 
+/** A block with an optional heading (blank label = no heading element). */
+function block(label: string, content: string, level: 2 | 3): string {
+  const h = isBlank(label) ? '' : heading(level === 2 ? 'h2' : 'h3', label.trim())
+  return `<section class="block">${h}${content}</section>`
+}
+
 function textBlock(label: string, section: TextSection, level: 2 | 3): string {
-  return `<section class="block">${heading(level === 2 ? 'h2' : 'h3', label)}${textBody(section.text)}</section>`
+  return block(label, textBody(section.text), level)
 }
 
 function optionalTextBlock(label: string, section: TextSection): string {
@@ -136,7 +159,7 @@ function clearanceText(decision: VisitDocument['oncology']['clearance']['decisio
   return nd()
 }
 
-function oncologyBlock(doc: VisitDocument): string {
+function oncologyBlock(doc: VisitDocument, label = 'Oncology'): string {
   const o = doc.oncology
   const treatment: Array<[string, string]> = []
   if (!isBlank(o.regimen)) treatment.push(['Regimen', o.regimen])
@@ -147,7 +170,7 @@ function oncologyBlock(doc: VisitDocument): string {
   const treatmentHtml = treatment.length === 0 ? `<p class="nd">${escapeHtml(NOT_DOCUMENTED)}</p>` : kvTable(treatment)
   const reason = isBlank(o.clearance.reason) ? '' : `<p>Reason: ${escapeHtml(o.clearance.reason.trim())}</p>`
   return `<section class="block">
-${heading('h2', 'Oncology')}
+${isBlank(label) ? '' : heading('h2', label.trim())}
 <p class="ecog">${o.ecog === null ? nd() : `ECOG ${escapeHtml(String(o.ecog))}`}</p>
 ${heading('h3', 'Treatment')}
 ${treatmentHtml}
@@ -175,6 +198,14 @@ function medicationItem(med: Medication): string {
   return `<li class="med"><div class="med-name"><strong>${name}</strong>${strength}</div><div class="med-details">${fields.join(' · ')}</div></li>`
 }
 
+function medicationsBlock(snap: VerifiedSnapshot, label: string): string {
+  const meds = snap.document.prescription.medications
+  const list = meds.length === 0
+    ? '<p>No medicines prescribed</p>'
+    : `<ol class="meds">${meds.map((med) => medicationItem(med)).join('')}</ol>`
+  return block(label, list, 2)
+}
+
 function signatureBlock(snap: VerifiedSnapshot): string {
   const d = snap.doctor
   const footer = isBlank(snap.clinic.footerText)
@@ -199,10 +230,14 @@ function draftWatermark(): string {
   return `<div class="watermark" aria-hidden="true">${cells}</div>`
 }
 
-function styles(layout: LayoutSettings): string {
-  const { marginTopMm, marginRightMm, marginBottomMm, marginLeftMm, fontSizePt } = layout
+/** Draft banner + watermark, shared with custom formats. */
+export function draftOverlay(): string {
+  return `${draftBanner()}${draftWatermark()}`
+}
+
+/** Page-independent CSS for rendered documents (all templates share the same look). */
+export function baseCss(fontSizePt: number): string {
   return `
-@page { size: A4; margin: ${marginTopMm}mm ${marginRightMm}mm ${marginBottomMm}mm ${marginLeftMm}mm; }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; font-size: ${fontSizePt}pt; line-height: 1.45; color: #111; }
 h1 { font-size: 1.7em; margin: 0 0 4mm; }
@@ -239,6 +274,13 @@ table.kv th { width: 30%; font-weight: 600; white-space: nowrap; }
 .watermark { position: fixed; top: -20mm; right: -20mm; bottom: -20mm; left: -20mm; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(5, 1fr); place-items: center; gap: 6mm; transform: rotate(-28deg); opacity: 0.07; pointer-events: none; z-index: 9999; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .watermark span { font-size: 20pt; font-weight: 700; color: #000; white-space: nowrap; }
 `
+}
+
+function styles(layout: LayoutSettings): string {
+  const { marginTopMm, marginRightMm, marginBottomMm, marginLeftMm, fontSizePt } = layout
+  return `
+@page { size: A4; margin: ${marginTopMm}mm ${marginRightMm}mm ${marginBottomMm}mm ${marginLeftMm}mm; }
+${baseCss(fontSizePt)}`
 }
 
 function clinicHeader(snap: VerifiedSnapshot): string {
@@ -320,4 +362,51 @@ export function renderPrescriptionHtml(snap: VerifiedSnapshot, layout: LayoutSet
 export function renderCombinedHtml(snap: VerifiedSnapshot, layout: LayoutSettings, opts: RenderOptions): string {
   const body = `${noteBody(snap)}<div class="page-break" aria-hidden="true"></div>${prescriptionBody(snap)}`
   return wrapDocument('OPD Visit Note / Prescription & Plan', layout, opts, body, snap)
+}
+
+/**
+ * One section of a custom format, with the doctor's own heading.
+ * Blank heading = no heading element; the content is still rendered.
+ */
+export function renderSection(key: SectionKey, snap: VerifiedSnapshot, headingLabel: string): string {
+  const doc = snap.document
+  const h = doc.history
+  switch (key) {
+    case 'identity':
+      return `${isBlank(headingLabel) ? '' : heading('h2', headingLabel.trim())}${identityBox(snap)}`
+    case 'chiefComplaints':
+      return textBlock(headingLabel, h.chiefComplaints, 2)
+    case 'hpi':
+      return textBlock(headingLabel, h.hpi, 2)
+    case 'pastHistory':
+      return textBlock(headingLabel, h.pastHistory, 2)
+    case 'medicationHistory':
+      return textBlock(headingLabel, h.medicationHistory, 2)
+    case 'symptoms':
+      return block(headingLabel, findingsList(h.symptoms), 2)
+    case 'allergies':
+      return block(headingLabel, `<p>${triStateText(h.allergiesReviewed)}</p>`, 2)
+    case 'vitals':
+      return block(headingLabel, vitalsTable(doc.vitals), 2)
+    case 'oncology':
+      return oncologyBlock(doc, headingLabel)
+    case 'examination':
+      return textBlock(headingLabel, doc.examination, 2)
+    case 'assessment':
+      return textBlock(headingLabel, doc.assessment, 2)
+    case 'plan':
+      return textBlock(headingLabel, doc.plan, 2)
+    case 'medications':
+      return medicationsBlock(snap, headingLabel)
+    case 'investigationsAdvised':
+      return textBlock(headingLabel, snap.document.prescription.investigationsAdvised, 2)
+    case 'advice':
+      return textBlock(headingLabel, snap.document.prescription.advice, 2)
+    case 'returnPrecautions':
+      return textBlock(headingLabel, snap.document.prescription.returnPrecautions, 2)
+    case 'followUp':
+      return textBlock(headingLabel, snap.document.prescription.followUp, 2)
+    case 'signature':
+      return `${isBlank(headingLabel) ? '' : heading('h2', headingLabel.trim())}${signatureBlock(snap)}`
+  }
 }
