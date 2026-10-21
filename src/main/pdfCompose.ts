@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, type PDFEmbeddedPage, type PDFImage, type PDFPage } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib'
 import type { LayoutSettings } from '../shared/types'
 
 export const A4 = { width: 595.28, height: 841.89 }
@@ -30,8 +30,39 @@ export interface Stamp {
   label: string
 }
 
-/** Helvetica can only encode WinAnsi; replace anything else so stamping never fails. */
-const winAnsi = (s: string): string => s.replace(/[^\x20-\x7E -ÿ]/g, '?')
+/**
+ * Helvetica can only encode WinAnsi. Accented letters fold to their base letter
+ * (Ś → S) so names stay readable; anything else becomes '?' so stamping never fails.
+ */
+export function toEncodable(s: string, font: PDFFont): string {
+  const supported = new Set(font.getCharacterSet())
+  const ok = (c: string): boolean => supported.has(c.codePointAt(0) ?? -1)
+  return Array.from(s.normalize('NFC'), (c) => {
+    if (ok(c)) return c
+    const base = Array.from(c.normalize('NFKD')).filter((x) => !/\p{M}/u.test(x))
+    return base.length > 0 && base.every(ok) ? base.join('') : '?'
+  }).join('')
+}
+
+const MIN_STAMP_SIZE = 5
+
+/**
+ * The stamp must stay on one line inside the bottom margin: shrink it to fit, and only
+ * when even the minimum size overflows, elide the middle (label and MRN/date ends stay).
+ */
+export function fitStamp(text: string, font: PDFFont, size: number, maxWidth: number): { text: string; size: number } {
+  const fitSize = Math.min(size, (size * maxWidth) / Math.max(font.widthOfTextAtSize(text, size), 1))
+  if (fitSize >= MIN_STAMP_SIZE) return { text, size: fitSize }
+  const chars = Array.from(text)
+  let keep = chars.length
+  let out = text
+  while (keep > 2 && font.widthOfTextAtSize(out, MIN_STAMP_SIZE) > maxWidth) {
+    keep--
+    const head = Math.ceil(keep / 2)
+    out = chars.slice(0, head).join('') + '…' + chars.slice(chars.length - (keep - head)).join('')
+  }
+  return { text: out, size: MIN_STAMP_SIZE }
+}
 
 interface EmbeddedBackground {
   page: PDFEmbeddedPage | null
@@ -101,10 +132,11 @@ export async function composePdf(
     if (overlayPages[i]) page.drawPage(overlayPages[i], { x: dx, y: dy, width, height })
 
     const y = stampY + dy
-    const left = winAnsi(`${stamp.label} | ${stamp.identity}`)
     const right = `Page ${i + 1} of ${total}`
     const color = rgb(0.3, 0.3, 0.3)
-    page.drawText(left, { x: stampLeft + dx, y, size, font, color, maxWidth: width * 0.7 })
+    const room = width - stampLeft - stampRight - font.widthOfTextAtSize(right, size) - 4 * MM
+    const left = fitStamp(toEncodable(`${stamp.label} | ${stamp.identity}`, font), font, size, room)
+    page.drawText(left.text, { x: stampLeft + dx, y, size: left.size, font, color })
     page.drawText(right, {
       x: width - stampRight - font.widthOfTextAtSize(right, size) + dx,
       y,
@@ -114,7 +146,7 @@ export async function composePdf(
     })
   })
 
-  out.setTitle(winAnsi(stamp.label))
+  out.setTitle(stamp.label)
   out.setProducer('OPD Scribe')
   out.setCreator('OPD Scribe')
   return out.save()

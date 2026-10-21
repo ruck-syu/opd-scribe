@@ -240,6 +240,8 @@ export function baseCss(fontSizePt: number): string {
   return `
 * { box-sizing: border-box; }
 body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; font-size: ${fontSizePt}pt; line-height: 1.45; color: #111; }
+/* long unbroken tokens (codes, URLs) wrap instead of running past the column and being clipped */
+body { overflow-wrap: anywhere; }
 h1 { font-size: 1.7em; margin: 0 0 4mm; }
 h1, h2, h3 { break-after: avoid; page-break-after: avoid; }
 h2 { font-size: 1.15em; margin: 6mm 0 2mm; padding-bottom: 1mm; border-bottom: 0.5pt solid #999; }

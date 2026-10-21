@@ -1,7 +1,7 @@
 import { PDFDict, PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '../shared/defaults'
-import { A4, composePdf, mmToPt } from './pdfCompose'
+import { A4, composePdf, fitStamp, mmToPt, toEncodable } from './pdfCompose'
 
 async function makePdf(pages: Array<{ width: number; height: number }>): Promise<Uint8Array> {
   const doc = await PDFDocument.create()
@@ -61,5 +61,33 @@ describe('composePdf', () => {
       }
     })
     expect((await PDFDocument.load(out)).getPageCount()).toBe(2)
+  })
+})
+
+describe('page stamp text', () => {
+  const helvetica = async () => (await PDFDocument.create()).embedFont(StandardFonts.Helvetica)
+
+  it('folds accents to base letters and replaces unsupported scripts', async () => {
+    const font = await helvetica()
+    expect(toEncodable('Śrīmatī Lakshmī', font)).toBe('Srimati Lakshmi')
+    expect(toEncodable('Céline — Müller', font)).toBe('Céline — Müller')
+    expect(toEncodable('राम', font)).toBe('???')
+  })
+
+  it('shrinks to fit one line and elides only when the minimum size overflows', async () => {
+    const font = await helvetica()
+    const short = fitStamp('OPD Visit Note | A | MRN 1', font, 7.5, 400)
+    expect(short).toEqual({ text: 'OPD Visit Note | A | MRN 1', size: 7.5 })
+    const long = 'Prescription & Plan | ' + 'Venkatanarasimharajuvaripeta '.repeat(3) + '| MRN 123 | Visit 2026-10-22 00:17'
+    const fitted = fitStamp(long, font, 7.5, 400)
+    expect(fitted.text).toBe(long)
+    expect(fitted.size).toBeLessThan(7.5)
+    expect(font.widthOfTextAtSize(fitted.text, fitted.size)).toBeLessThanOrEqual(400.01)
+    const elided = fitStamp(long.repeat(4), font, 7.5, 400)
+    expect(elided.size).toBe(5)
+    expect(elided.text).toContain('…')
+    expect(elided.text.startsWith('Prescription & Plan')).toBe(true)
+    expect(elided.text.endsWith('00:17')).toBe(true)
+    expect(font.widthOfTextAtSize(elided.text, 5)).toBeLessThanOrEqual(400)
   })
 })

@@ -44,6 +44,11 @@ describe('escapeHtml', () => {
 })
 
 describe('renderNoteHtml', () => {
+  it('wraps long unbroken tokens instead of letting them widen the page', () => {
+    // an overflowing token makes Chromium shrink the whole printed page to fit
+    expect(renderNoteHtml(fixture(), LAYOUT, { draft: false })).toMatch(/overflow-wrap: anywhere/)
+  })
+
   it('renders present and absent findings but never not_assessed ones', () => {
     const snap = fixture()
     snap.document.history.symptoms = [

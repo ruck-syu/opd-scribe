@@ -225,7 +225,7 @@ export function renderFieldsOverlayHtml(snap: VerifiedSnapshot, template: FormTe
 html, body { margin: 0; padding: 0; background: transparent; }
 .page { position: relative; width: ${mmText(t.pageWidthMm)}mm; height: ${mmText(t.pageHeightMm)}mm; overflow: visible; break-after: page; page-break-after: always; }
 .page.last { break-after: auto; page-break-after: auto; }
-.field { position: absolute; overflow: visible; white-space: pre-wrap; line-height: 1.3; color: #111; font-family: "Segoe UI", Arial, sans-serif; }
+.field { position: absolute; overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.3; color: #111; font-family: "Segoe UI", Arial, sans-serif; }
 .nd { color: #666; font-style: italic; }
 </style>
 </head>

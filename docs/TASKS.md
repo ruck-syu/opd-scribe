@@ -1,6 +1,6 @@
 # OPD Scribe — open tasks (post-MVP)
 
-Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced. Typecheck clean, 58/58 tests, E2E smoke + custom-format E2E passed on macOS.
+Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced. Typecheck clean, 96/96 tests, E2E smoke, custom-format, ASR-coverage, consent and PDF stress E2E passed on macOS.
 
 ## Needs the user / the Ryzen laptop
 - [ ] Install `release/OPD Scribe Setup 0.1.0.exe` on the Ryzen laptop (unsigned → SmartScreen: "More info → Run anyway").
@@ -18,6 +18,19 @@ Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced. Typecheck clea
 - [x] Rebuild the Windows installer with the custom print format.
 - [x] `git init` + first commit.
 
-## Optional hardening
-- [ ] Services integration test using `Store.memory()` + a fake Platform.
-- [ ] Reset `acknowledgedFlags` when the flagged content changes.
+- [ ] Rebuild the Windows installer (the refinements below landed after the last build).
+
+## Refinements (done)
+- [x] Services integration test using `Store.memory()` + a fake Platform (verify / export / amendment gates).
+- [x] Acknowledgements are bound to the flagged content (`ackKey`); editing it re-raises the warning. Drafts acknowledged before this change need re-acknowledging.
+- [x] Speech coverage: audio with detected speech but no transcript is inserted as an `[untranscribed audio mm:ss–mm:ss]` segment with a warning.
+- [x] Clinic formulary (Settings › Clinic): medications not in it are flagged with the closest entry; nothing is auto-corrected.
+- [x] Recording consent: consultation recording requires an audited consent confirmation, enforced in the service.
+- [x] Microphone unplugged mid-recording: stops, keeps and submits what was captured.
+- [x] PDF stress test (25 medications, 14-paragraph HPI, Indic scripts, unbroken tokens): no text lost. Fixed: long tokens shrank the whole page; page stamp wrapped below the margin and turned accented names into `?`.
+
+## Later
+- [ ] Chunked live transcription during the visit (today: transcribe after stopping).
+- [ ] Speaker diarisation (today: segments are unlabelled until the doctor labels them).
+- [ ] Schema migration test harness for future `VisitDocument` versions.
+- [ ] "Insert all into HPI" also copies `[untranscribed audio …]` markers; the doctor deletes them by hand.
