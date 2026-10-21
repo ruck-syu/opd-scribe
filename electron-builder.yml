@@ -12,8 +12,11 @@ extraResources:
   - from: resources/whisper
     to: whisper
     filter: ['**/*', '!README.md']
+# Space-free artifact names: GitHub rewrites spaces to dots on upload, which would
+# make the published SHA256SUMS.txt unusable against the downloaded file names.
 win:
   icon: build/icon.ico
+  artifactName: OPD-Scribe-Setup-${version}.${ext}
   target:
     - target: nsis
       arch: [x64]
@@ -23,6 +26,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
 mac:
+  artifactName: OPD-Scribe-${version}-${arch}.${ext}
   target: [dmg]
   category: public.app-category.medical
   hardenedRuntime: true
