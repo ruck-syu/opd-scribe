@@ -1,6 +1,8 @@
 // Shared domain types used by main, preload and renderer.
 // Schema rule (PRD §6.2): empty strings / nulls / 'not_assessed' are NEVER clinical negatives.
 
+import type { FormatSettings } from './formTemplate'
+
 export const SCHEMA_VERSION = 1
 
 export type Role = 'doctor' | 'staff'
@@ -236,6 +238,8 @@ export interface VerifiedSnapshot {
   document: VisitDocument
   doctor: { name: string; registrationNo: string; qualifications: string }
   clinic: ClinicSettings
+  /** print formats in force when rendered; frozen at verification, excluded from the content hash */
+  formats?: FormatSettings
 }
 
 // ---------- Flags ----------
@@ -288,6 +292,8 @@ export interface AppSettings {
   symptomChecklist: string[]
   /** letterhead file stored encrypted in app data; only its type is in settings */
   letterheadType: '' | 'pdf' | 'png' | 'jpg'
+  /** custom print formats built from an uploaded sample; null = built-in format */
+  formats: FormatSettings
 }
 
 export interface AuditEntry {

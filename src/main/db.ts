@@ -159,7 +159,8 @@ export class Store {
       ...saved,
       clinic: { ...DEFAULT_SETTINGS.clinic, ...saved.clinic },
       layout: { ...DEFAULT_SETTINGS.layout, ...saved.layout },
-      asr: { ...DEFAULT_SETTINGS.asr, ...saved.asr }
+      asr: { ...DEFAULT_SETTINGS.asr, ...saved.asr },
+      formats: { ...DEFAULT_SETTINGS.formats, ...saved.formats }
     }
   }
 

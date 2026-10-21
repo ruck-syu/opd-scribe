@@ -81,7 +81,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoLockMinutes: 10,
   toxicityChecklist: DEFAULT_TOXICITIES,
   symptomChecklist: DEFAULT_SYMPTOMS,
-  letterheadType: ''
+  letterheadType: '',
+  formats: { note: null, prescription: null }
 }
 
 /** "Not documented" is how missing information is rendered (CMP-06). */

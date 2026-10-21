@@ -16,6 +16,7 @@ import type {
   User,
   VisitDocument
 } from './types'
+import type { DocKind, FormTemplate } from './formTemplate'
 
 export interface AppStatus {
   setupDone: boolean
@@ -61,6 +62,14 @@ export interface PreviewResult {
   draft: boolean
 }
 
+export interface SampleInfo {
+  sampleId: string
+  sampleType: 'pdf' | 'png' | 'jpg'
+  /** size of the sample's first page (A4 for images) */
+  pageWidthMm: number
+  pageHeightMm: number
+}
+
 export interface AsrCheck {
   binaryOk: boolean
   modelOk: boolean
@@ -86,6 +95,14 @@ export interface ApiMap {
   'settings.testPrint': () => PreviewResult
   'settings.checkAsr': () => AsrCheck
   'settings.pickFile': (title: string, extensions: string[]) => string | null
+
+  /** pick a sample OPD PDF/PNG/JPG, store it encrypted; null if cancelled */
+  'formats.uploadSample': (kind: DocKind) => SampleInfo | null
+  'formats.sample': (sampleId: string) => { type: 'pdf' | 'png' | 'jpg'; data: Uint8Array } | null
+  /** save (version bumped, validated) or revert to the built-in format with null */
+  'formats.save': (kind: DocKind, template: FormTemplate | null) => AppSettings
+  /** render an unsaved template with a fictitious sample patient (draft watermark) */
+  'formats.preview': (template: FormTemplate) => PreviewResult
 
   'patients.search': (query: string) => Patient[]
   'patients.get': (id: string) => Patient
@@ -143,6 +160,10 @@ export const CHANNELS = [
   'settings.testPrint',
   'settings.checkAsr',
   'settings.pickFile',
+  'formats.uploadSample',
+  'formats.sample',
+  'formats.save',
+  'formats.preview',
   'patients.search',
   'patients.get',
   'patients.create',
