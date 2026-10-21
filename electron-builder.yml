@@ -1,0 +1,31 @@
+appId: in.opdscribe.app
+productName: OPD Scribe
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+# whisper-cli + DLLs + ggml model, if present in resources/whisper (see docs/SPEECH_MODEL.md)
+extraResources:
+  - from: resources/whisper
+    to: whisper
+    filter: ['**/*', '!README.md']
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+mac:
+  target: [dmg]
+  category: public.app-category.medical
+  hardenedRuntime: true
+  entitlementsInherit: build/entitlements.mac.plist
+  entitlements: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: OPD Scribe records consultations and dictation for offline transcription on this computer.
