@@ -14,7 +14,7 @@ Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced. Typecheck clea
 ## Docs / housekeeping
 - [x] `docs/SPEECH_MODEL.md`: Windows whisper.cpp Vulkan build, Apex → ggml conversion, large-v3-turbo fallback.
 - [x] README: run / build / install.
-- [ ] App icon.
+- [x] App icon (`build/icon.svg` is the source; regenerate PNG/ICO with `npm run icons`).
 - [x] Rebuild the Windows installer with the custom print format.
 - [x] `git init` + first commit.
 

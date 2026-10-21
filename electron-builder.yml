@@ -13,6 +13,7 @@ extraResources:
     to: whisper
     filter: ['**/*', '!README.md']
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]

@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "dist:win": "electron-vite build && electron-builder --win --x64",
-    "dist:mac": "electron-vite build && electron-builder --mac"
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "icons": "electron scripts/make-icons.cjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
