@@ -69,7 +69,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npx electron-vite build
-      - run: ${{ matrix.command }} -c.extraMetadata.version=${{ env.VERSION }}
+      - run: ${{ matrix.command }} --config.extraMetadata.version="$VERSION"
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os }}
