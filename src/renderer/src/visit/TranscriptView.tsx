@@ -32,7 +32,13 @@ export function TranscriptView(props: { ctx: VisitCtx; transcript: Transcript; d
 
   // Takes only the suggestion fields: segment text typed since the last save must not be overwritten.
   const adoptSuggestions = (saved: Transcript): void => {
-    const next = { ...latest.current, suggestions: saved.suggestions, rejectedSuggestions: saved.rejectedSuggestions }
+    const next = {
+      ...latest.current,
+      suggestions: saved.suggestions,
+      rejectedSuggestions: saved.rejectedSuggestions,
+      llmStatus: saved.llmStatus,
+      llmError: saved.llmError
+    }
     setT(next)
     latest.current = next
   }
@@ -128,9 +134,7 @@ export function TranscriptView(props: { ctx: VisitCtx; transcript: Transcript; d
       </div>
       {open && (
         <>
-          {(t.kind === 'conversation' || !!t.suggestions?.length || !!t.rejectedSuggestions?.length) && (
-            <SuggestionsPanel ctx={ctx} transcript={t} onChange={adoptSuggestions} />
-          )}
+          <SuggestionsPanel ctx={ctx} transcript={t} onChange={adoptSuggestions} />
           <div className="segments">
             {t.segments.map((s) => (
               <div key={s.id} className={`segment ${s.warning ? 'has-warning' : ''} sp-${s.speaker}`}>

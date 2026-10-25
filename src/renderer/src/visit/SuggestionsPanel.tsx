@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { call, errMsg } from '../api'
 import { applySuggestion, type Suggestion, type SuggestionTarget } from '../../../shared/extract'
 import { sectionLabel } from '../../../shared/sections'
@@ -130,14 +130,67 @@ export function SuggestionsPanel(props: { ctx: VisitCtx; transcript: Transcript;
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [groupError, setGroupError] = useState('')
   const [showRejected, setShowRejected] = useState(false)
+  const [llmOn, setLlmOn] = useState(false)
   // written into the note but the decision was not saved: a retry must not insert the text twice
   const applied = useRef(new Set<string>())
+
+  useEffect(() => {
+    call('settings.get')
+      .then((s) => setLlmOn(s.llm.enabled))
+      .catch(() => setLlmOn(false))
+  }, [])
 
   const suggestions = t.suggestions ?? []
   const rejected = t.rejectedSuggestions ?? []
   const pending = suggestions.filter((s) => s.status === 'pending')
   const manual = t.kind === 'conversation' ? notMentioned(ctx.doc, suggestions) : []
   const setRowError = (id: string, msg: string): void => setRowErrors((r) => ({ ...r, [id]: msg }))
+  const aiCount = suggestions.filter((s) => s.engine === 'llm').length
+
+  const runAi = async (): Promise<void> => {
+    setBusy(true)
+    setGroupError('')
+    try {
+      onChange(await call('transcripts.runLlm', t.id, ctx.patientId))
+    } catch (e) {
+      setGroupError(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** One status line for the optional AI extraction: running, failed (with retry), done, or not yet run. */
+  const aiLine = (): ReactNode => {
+    if (t.llmStatus === 'running') return <p className="notice small">AI extraction running…</p>
+    if (t.llmStatus === 'failed')
+      return (
+        <div className="error small">
+          AI extraction failed: {t.llmError || 'unknown error'}
+          {!ctx.readOnly && (
+            <button className="small" disabled={busy} onClick={() => void runAi()}>
+              Retry
+            </button>
+          )}
+        </div>
+      )
+    if (t.llmStatus === 'done')
+      return aiCount > 0 ? (
+        <p className="muted small">Includes {aiCount} AI suggestion(s), marked AI. Each one still needs your acceptance.</p>
+      ) : (
+        <p className="muted small">AI extraction ran and proposed nothing new.</p>
+      )
+    if (llmOn && !ctx.readOnly)
+      return (
+        <div className="row tight">
+          <span className="muted small">AI extraction has not run on this recording.</span>
+          <button className="small" disabled={busy} onClick={() => void runAi()}>
+            Run AI extraction
+          </button>
+        </div>
+      )
+    return null
+  }
+  const ai = aiLine()
 
   /** Writes rows into the note, then records each decision. Returns the first row that failed, if any. */
   const accept = async (rows: Suggestion[]): Promise<Suggestion | null> => {
@@ -201,6 +254,7 @@ export function SuggestionsPanel(props: { ctx: VisitCtx; transcript: Transcript;
     <div key={s.id} className={`suggestion ${s.warning ? 'has-warning' : ''}`}>
       <div className="sug-main">
         <b>{labelOf(s)}</b>
+        {s.engine === 'llm' && <span className="pill ai" title="Proposed by the local AI model; check it against the quote">AI</span>}
         {s.target.kind === 'medication' ? (
           <MedFields med={s.target.med} />
         ) : (
@@ -225,7 +279,7 @@ export function SuggestionsPanel(props: { ctx: VisitCtx; transcript: Transcript;
     </div>
   )
 
-  if (!suggestions.length && !rejected.length && !manual.length) return null
+  if (!suggestions.length && !rejected.length && !manual.length && !ai) return null
   const rejectedLabel = `${rejected.length} candidate${rejected.length === 1 ? '' : 's'} rejected (not backed by the transcript)`
 
   const unlabelled =
@@ -239,6 +293,7 @@ export function SuggestionsPanel(props: { ctx: VisitCtx; transcript: Transcript;
         <b>Suggestions from this recording</b>
         <span className="muted small">Nothing enters the note until you accept a row.</span>
       </div>
+      {ai && <div className="sug-ai">{ai}</div>}
       {unlabelled > 0 && (
         <p className="notice small">
           {unlabelled} segment(s) have no confirmed speaker, so their suggestions are marked “Speaker not confirmed” and
@@ -252,7 +307,8 @@ export function SuggestionsPanel(props: { ctx: VisitCtx; transcript: Transcript;
         const rows = pending.filter((s) => groupOf(s.target) === g)
         const decided = suggestions.filter((s) => s.status !== 'pending' && groupOf(s.target) === g)
         if (!rows.length && !decided.length) return null
-        const safe = rows.filter((s) => s.value && !s.warning)
+        // AI rows are accepted one by one, never in bulk
+        const safe = rows.filter((s) => s.value && !s.warning && s.engine === 'rules')
         return (
           <div key={g} className="sug-group">
             <div className="sug-group-head">
@@ -269,6 +325,7 @@ export function SuggestionsPanel(props: { ctx: VisitCtx; transcript: Transcript;
             {decided.map((s) => (
               <div key={s.id} className="sug-done small">
                 <span className="muted">{labelOf(s)}</span>
+                {s.engine === 'llm' && <span className="pill ai">AI</span>}
                 <span className={`pill ${s.status === 'accepted' ? 'ok' : ''}`}>{s.status === 'accepted' ? 'Accepted' : 'Dismissed'}</span>
               </div>
             ))}

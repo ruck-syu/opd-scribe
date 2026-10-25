@@ -76,6 +76,8 @@ export interface AsrCheck {
   message: string
 }
 
+export type LlmCheck = AsrCheck
+
 /** Every IPC channel and its signature. Main implements, preload allow-lists, renderer calls. */
 export interface ApiMap {
   'app.status': () => AppStatus
@@ -94,6 +96,7 @@ export interface ApiMap {
   'settings.clearLetterhead': () => AppSettings
   'settings.testPrint': () => PreviewResult
   'settings.checkAsr': () => AsrCheck
+  'settings.checkLlm': () => LlmCheck
   'settings.pickFile': (title: string, extensions: string[]) => string | null
 
   /** pick a sample OPD PDF/PNG/JPG, store it encrypted; null if cancelled */
@@ -129,6 +132,8 @@ export interface ApiMap {
   'transcripts.retry': (transcriptId: string, encounterId: string, patientId: string) => Transcript
   'transcripts.save': (transcript: Transcript, patientId: string) => Transcript
   'transcripts.delete': (transcriptId: string, encounterId: string, patientId: string) => void
+  /** start (or restart) the optional AI extraction in the background; returns the transcript as 'running' */
+  'transcripts.runLlm': (transcriptId: string, patientId: string) => Transcript
   /** the doctor's decision on one suggestion; decisions are final (no undo) */
   'transcripts.decideSuggestion': (
     transcriptId: string,
@@ -169,6 +174,7 @@ export const CHANNELS = [
   'settings.clearLetterhead',
   'settings.testPrint',
   'settings.checkAsr',
+  'settings.checkLlm',
   'settings.pickFile',
   'formats.uploadSample',
   'formats.sample',
@@ -195,6 +201,7 @@ export const CHANNELS = [
   'transcripts.retry',
   'transcripts.save',
   'transcripts.delete',
+  'transcripts.runLlm',
   'transcripts.decideSuggestion',
   'review.flags',
   'review.preview',

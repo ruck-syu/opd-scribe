@@ -539,3 +539,17 @@ describe('undecided suggestions', () => {
     expect(ids(computeFlags(patient, doc(), [t]))).not.toContain('tx.t1.suggestions')
   })
 })
+
+describe('AI extraction in progress', () => {
+  const doc = (): VisitDocument => emptyDocument(DEFAULT_SETTINGS, '2026-10-21T10:00')
+
+  it('blocks verification while the run is going and clears once it finishes', () => {
+    const running = computeFlags(patient, doc(), [{ ...conversation(), llmStatus: 'running' }]).find((f) => f.id === 'tx.t1.llm')
+    expect(running).toMatchObject({ severity: 'blocking', area: 'transcript', message: 'Conversation transcript: AI extraction is still running' })
+    expect(canVerify(computeFlags(patient, doc(), [{ ...conversation(), llmStatus: 'running' }]), [])).toBe(false)
+
+    for (const llmStatus of ['done', 'failed'] as const) {
+      expect(ids(computeFlags(patient, doc(), [{ ...conversation(), llmStatus }]))).not.toContain('tx.t1.llm')
+    }
+  })
+})

@@ -1,6 +1,6 @@
 // Services-level integration tests: the safety gates must hold when the IPC/UI
 // layer is bypassed and handlers are called directly (roadmap M6 exit, AC-18).
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
@@ -53,6 +53,7 @@ async function makeHarness(): Promise<Harness> {
   const platform: Platform = {
     dataDir: dir,
     whisperDirs: [],
+    llmDirs: [],
     version: '0.0.0-test',
     platform: 'test',
     htmlToPdf: async () => pdf,
@@ -642,5 +643,143 @@ describe('transcript suggestions', () => {
     await expect(decide(patient.id, t.id, bp.id, 'accepted')).rejects.toThrow(/Verified visit is locked/)
     const stored = (await call(h.handlers, 'transcripts.list', encounter.id, patient.id))[0]
     expect(stored.suggestions?.find((s) => s.id === bp.id)?.status).toBe('pending')
+  })
+})
+
+// Stands in for llama-completion: checks that the prompt file exists and holds the numbered lines,
+// then prints a fixed answer. A model path ending in broken.gguf makes it exit with an error.
+const FAKE_LLAMA = [
+  '#!/usr/bin/env node',
+  "const { readFileSync } = require('node:fs')",
+  'const args = process.argv.slice(2)',
+  "const arg = (flag) => args[args.indexOf(flag) + 1]",
+  "if (arg('-m').endsWith('broken.gguf')) process.exit(3)",
+  "const prompt = readFileSync(arg('-f'), 'utf8')",
+  "if (!prompt.includes('[2] Doctor: Tab Ondansetron 8 mg TDS for 3 days')) process.exit(4)",
+  'const items = [',
+  "  { segment: 1, quote: 'BP 130/80', field: 'vital.bp', value: '130/80' },",
+  "  { segment: 1, quote: 'ECOG 1', field: 'ecog', value: '1' },",
+  "  { segment: 1, quote: 'Patient has jaundice', field: 'assessment', value: 'Jaundice' },",
+  "  { segment: 2, quote: 'Tab Ondansetron 8 mg TDS for 3 days', field: 'plan', value: 'Tab Ondansetron 8 mg TDS for 3 days' }",
+  ']',
+  "process.stdout.write('Result:\\n' + JSON.stringify({ items }) + '\\n')",
+  ''
+].join('\n')
+
+describe.skipIf(process.platform === 'win32')('AI extraction (fake llama-completion)', () => {
+  const seg = (id: string, text: string): TranscriptSegment => ({
+    id,
+    startMs: 0,
+    endMs: 1000,
+    originalText: text,
+    text,
+    speaker: 'doctor',
+    speakerUncertain: false,
+    warning: ''
+  })
+
+  /** A ready conversation with rules-visible vitals and a medicine, inserted as the engine would. */
+  async function readyTranscript(): Promise<{ patient: Patient; encounter: Encounter; t: Transcript }> {
+    const { patient, encounter } = await startSession()
+    await call(h.handlers, 'settings.update', { formulary: ['Ondansetron'] })
+    const t = h.store.saveTranscript({
+      id: uid(),
+      encounterId: encounter.id,
+      kind: 'conversation',
+      section: null,
+      createdAt: new Date().toISOString(),
+      durationMs: 60000,
+      status: 'ready',
+      error: '',
+      reviewed: false,
+      audioRetained: false,
+      segments: [seg('s1', 'BP 130/80, ECOG 1'), seg('s2', 'Tab Ondansetron 8 mg TDS for 3 days')]
+    })
+    return { patient, encounter, t }
+  }
+
+  function llmSettings(modelName: string): Promise<unknown> {
+    return call(h.handlers, 'settings.update', {
+      llm: { enabled: true, binaryPath: join(h.dir, 'llama-completion'), modelPath: join(h.dir, modelName), threads: 2, template: 'chatml' }
+    })
+  }
+
+  /** Background runs finish asynchronously; poll the stored transcript until the run is no longer 'running'. */
+  async function untilLlmDone(transcriptId: string): Promise<Transcript> {
+    for (let i = 0; i < 400; i++) {
+      const t = h.store.getTranscript(transcriptId)!
+      if (t.llmStatus !== 'running') return t
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    throw new Error('AI extraction did not finish')
+  }
+
+  beforeEach(() => {
+    writeFileSync(join(h.dir, 'llama-completion'), FAKE_LLAMA, { mode: 0o755 })
+    chmodSync(join(h.dir, 'llama-completion'), 0o755)
+    writeFileSync(join(h.dir, 'model.gguf'), 'not a real model')
+    writeFileSync(join(h.dir, 'broken.gguf'), 'not a real model')
+  })
+
+  it('refuses to run while AI extraction is off', async () => {
+    const { patient, t } = await readyTranscript()
+    await expect(call(h.handlers, 'transcripts.runLlm', t.id, patient.id)).rejects.toThrow(/AI extraction is off/)
+  })
+
+  it('merges AI proposals beside the rules, drops duplicates, rejects a fabricated quote and clears the running block', async () => {
+    const { patient, encounter, t } = await readyTranscript()
+    await llmSettings('model.gguf')
+    // the rules pass runs on save, as it does during normal use
+    await call(h.handlers, 'transcripts.save', t, patient.id)
+
+    const running = await call(h.handlers, 'transcripts.runLlm', t.id, patient.id)
+    expect(running.llmStatus).toBe('running')
+    await expect(call(h.handlers, 'transcripts.runLlm', t.id, patient.id)).rejects.toThrow(/already running/)
+    const blocked = await call(h.handlers, 'review.flags', encounter.id, patient.id)
+    expect(blocked.find((f) => f.id === `tx.${t.id}.llm`)).toMatchObject({ severity: 'blocking' })
+
+    const done = await untilLlmDone(t.id)
+    expect(done.llmStatus).toBe('done')
+    const sugs = done.suggestions ?? []
+    expect(sugs.filter((s) => s.engine === 'llm').map((s) => s.target.kind)).toEqual(['section'])
+    expect(sugs.filter((s) => s.target.kind === 'vital' && s.target.key === 'bp')).toHaveLength(1)
+    expect(sugs.find((s) => s.target.kind === 'ecog')?.engine).toBe('rules')
+    expect(done.rejectedSuggestions?.filter((r) => r.engine === 'llm').map((r) => r.reason)).toEqual([
+      'quote is not in the source segment'
+    ])
+
+    const plan = sugs.find((s) => s.engine === 'llm')!
+    const accepted = await call(h.handlers, 'transcripts.decideSuggestion', t.id, patient.id, plan.id, 'accepted')
+    expect(accepted.suggestions?.find((s) => s.id === plan.id)?.status).toBe('accepted')
+
+    const flags = await call(h.handlers, 'review.flags', encounter.id, patient.id)
+    expect(flags.some((f) => f.id === `tx.${t.id}.llm`)).toBe(false)
+
+    // re-extraction on save keeps the AI suggestions and their decisions
+    const resaved = await call(h.handlers, 'transcripts.save', done, patient.id)
+    expect(resaved.suggestions?.find((s) => s.id === plan.id)?.status).toBe('accepted')
+    expect(resaved.suggestions?.filter((s) => s.engine === 'llm')).toHaveLength(1)
+
+    // the audit log records the run without any transcript text
+    const audit = (await call(h.handlers, 'audit.list', 1000)).filter((e) => e.action.startsWith('llm.'))
+    expect(audit.map((e) => e.action)).toEqual(expect.arrayContaining(['llm.start', 'llm.done']))
+    expect(JSON.stringify(audit)).not.toContain('Ondansetron')
+  })
+
+  it('records a failed run with a short message and leaves the rules suggestions in place', async () => {
+    const { patient, encounter, t } = await readyTranscript()
+    await llmSettings('broken.gguf')
+    await call(h.handlers, 'transcripts.save', t, patient.id)
+
+    await call(h.handlers, 'transcripts.runLlm', t.id, patient.id)
+    const failed = await untilLlmDone(t.id)
+    expect(failed.llmStatus).toBe('failed')
+    expect(failed.llmError).toBe('AI extraction exited with code 3')
+    expect(failed.suggestions?.some((s) => s.engine === 'rules')).toBe(true)
+
+    const flags = await call(h.handlers, 'review.flags', encounter.id, patient.id)
+    expect(flags.some((f) => f.id === `tx.${t.id}.llm`)).toBe(false)
+    const audit = (await call(h.handlers, 'audit.list', 1000)).find((e) => e.action === 'llm.failed')
+    expect(audit?.entityId).toBe(t.id)
   })
 })

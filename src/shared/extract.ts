@@ -39,9 +39,9 @@ export interface RuleResult {
 const WORD = '\\p{L}\\p{M}\\p{N}'
 
 /** Lowercase, anything but letters/digits (any script, incl. Devanagari marks) collapsed to single spaces. */
-const normalise = (s: string): string => s.toLowerCase().replace(new RegExp(`[^${WORD}]+`, 'gu'), ' ').trim()
+export const normalise = (s: string): string => s.toLowerCase().replace(new RegExp(`[^${WORD}]+`, 'gu'), ' ').trim()
 
-const squash = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim()
+export const squash = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim()
 
 const numbersIn = (s: string): string[] => s.match(/\d+(?:\.\d+)?/g) ?? []
 
@@ -50,7 +50,7 @@ const inRange = (n: number, lo: number, hi: number): boolean => n >= lo && n <= 
 const unique = <T>(xs: T[]): T[] => [...new Set(xs)]
 
 /** FNV-1a hex; makes suggestion ids depend on content, not position, so decisions survive re-extraction. */
-function hash(s: string): string {
+export function hash(s: string): string {
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0
   return h.toString(16).padStart(8, '0')
@@ -154,7 +154,7 @@ interface Mention {
   polarity: Polarity
 }
 
-const warningsFor = (t: Transcript, seg: TranscriptSegment, extra: string[] = []): string => {
+export const warningsFor = (t: Transcript, seg: TranscriptSegment, extra: string[] = []): string => {
   const unconfirmed = t.kind === 'conversation' && (seg.speakerUncertain || seg.speaker === 'unlabelled')
   const speaker = unconfirmed ? ['Speaker not confirmed'] : []
   return [...speaker, ...extra, seg.warning].filter(Boolean).join('; ')
@@ -220,7 +220,7 @@ const CONCEPTS: string[][] = [
   ['nausea', 'vomiting', 'vomit', 'ulti', 'ji machalna', 'jee machalna', 'ji michlana', 'machalna'],
   ['mucositis', 'mouth ulcer', 'mouth ulcers', 'mouth sore', 'mouth sores', 'chhale', 'chhala'],
   ['diarrhea', 'diarrhoea', 'loose motion', 'loose motions', 'loose stool', 'dast'],
-  ['neuropathy', 'tingling', 'numbness', 'jhanjhanahat'],
+  ['neuropathy', 'tingling', 'numbness', 'jhanjhanahat', 'jhunjhuni', 'jhunjhunahat', 'sunn'],
   ['fever', 'bukhar', 'bukhaar'],
   ['dyspnea', 'dyspnoea', 'breathlessness', 'breathless', 'shortness of breath', 'saans phoolna', 'saans phoolti'],
   ['fatigue', 'weakness', 'kamzori', 'thakan', 'tiredness'],
@@ -234,7 +234,7 @@ const CONCEPTS: string[][] = [
   ['headache']
 ]
 
-const findingTerms = (name: string): string[] => {
+export const findingTerms = (name: string): string[] => {
   const norm = normalise(name)
   const matched = CONCEPTS.filter((c) => c.some((term) => ` ${norm} `.includes(` ${term} `)))
   return unique([norm, ...matched.flat()]).filter(Boolean)
@@ -242,7 +242,8 @@ const findingTerms = (name: string): string[] => {
 
 const NEGATION = bounded('no|not|never|denies|denied|deny|without|nahi|nahin|nhi|(?<!(?:hai|hain)\\s+)na', 'iu')
 const NEGATED_COPULA = bounded('(?:nahi|nahin|nhi|na)(?:\\s+(?:hai|hain|hoti|hota|hi))?', 'giu')
-const AFFIRMATION = bounded('has|have|having|hai|hain|present|positive|complains?|complaining|c\\s*\\/\\s*o|with|raha|rahi|rahe', 'iu')
+// a stated grade ("grade 1 neuropathy", "G2 mucositis") affirms the finding
+const AFFIRMATION = bounded('has|have|having|hai|hain|present|positive|complains?|complaining|c\\s*\\/\\s*o|with|raha|rahi|rahe|grade\\s*[1-5]|g[1-5]', 'iu')
 // clause boundaries: a negation only applies within its own clause
 const CLAUSE_BREAK = /[.,;:!?\n]+|\s+(?:but|however|lekin|par|aur|and|or|ya|also|plus|although|though)\s+|\s-\s/giu
 
@@ -259,7 +260,10 @@ function clauseAt(text: string, at: number): { start: number; text: string } {
 // "Bukhar hai kya?", "Do you have vomiting", "any fever" ask about a finding; they state nothing
 const QUESTION = /\?|^(?:do|does|did|any|koi)\b|^(?:is|are|was|were)\s+there\b|^(?:have|has)\s+(?:you|he|she|they|the\s+patient)\b|\b(?:kya|kyaa)\b/iu
 
-function polarityOf(clause: string): Polarity | null {
+/** A question asks about a finding; it states nothing. */
+export const isQuestion = (text: string): boolean => text.includes('?') || QUESTION.test(text.trim())
+
+export function polarityOf(clause: string): Polarity | null {
   if (QUESTION.test(clause.trim())) return null
   const negated = NEGATION.test(clause)
   // "nahi hai" is a negation, not an affirmation
@@ -272,7 +276,7 @@ function polarityOf(clause: string): Polarity | null {
 
 const FREQUENCY: [string, RegExp][] = [
   ['OD', /\bod\b|\bonce\s+(?:a\s+|per\s+)?day\b|\bonce\s+daily\b|(?<!\b(?:twice|thrice|times)\s+)\bdaily\b|\b(?:din|roz)\s+(?:me|mein|men)?\s*ek\s+baar\b/i],
-  ['BD', /\bbd\b|\bbid\b|\btwice\s+(?:a\s+|per\s+)?day\b|\btwice\s+daily\b|\b(?:din|roz)\s+(?:me|mein|men)?\s*do\s+baar\b/i],
+  ['BD', /\bbd\b|\bbid\b|\btwice\s+(?:a\s+|per\s+)?day\b|\btwice\s+daily\b|\bsubah\s+(?:aur\s+)?shaam\b|\b(?:din|roz)\s+(?:me|mein|men)?\s*do\s+baar\b/i],
   ['TDS', /\btds\b|\btid\b|\bthrice\b|\bthree\s+times\s+(?:a\s+|per\s+)?day\b|\b(?:din|roz)\s+(?:me|mein|men)?\s*teen\s+baar\b/i],
   ['QID', /\bqid\b|\bfour\s+times\s+(?:a\s+|per\s+)?day\b|\b(?:din|roz)\s+(?:me|mein|men)?\s*(?:char|chaar)\s+baar\b/i],
   ['HS', /\bhs\b|\bat\s+(?:night|bedtime)\b|\bbedtime\b|\braat\s+ko\b/i],
@@ -303,8 +307,21 @@ function medicationScope(text: string, hits: FormularyHit[], i: number): string 
   const h = hits[i]
   const next = i + 1 < hits.length ? hits[i + 1].at : text.length
   const rest = text.slice(h.end, next)
-  const stop = [MED_CONJ.exec(rest)?.index, /[.;\n]/.exec(rest)?.index].filter((x): x is number => x !== undefined)
+  const stop = [MED_CONJ.exec(rest)?.index, /[.;](?!\d)|\n/.exec(rest)?.index].filter((x): x is number => x !== undefined)
   return text.slice(h.at, stop.length ? h.end + Math.min(...stop) : next)
+}
+
+/**
+ * The details spoken for one named medicine, read only from its own stretch of the line (from the
+ * name to the next conjunction or sentence end). Used to keep an AI engine from putting another
+ * medicine's words, or a frequency, into the wrong field.
+ */
+export function spokenMedication(name: string, text: string): { med: Omit<Medication, 'id'>; scope: string } | null {
+  const m = phrase(name, 'iu').exec(text)
+  if (!m) return null
+  const end = (m.index ?? 0) + m[0].length
+  const scope = medicationScope(text, [{ name, at: m.index ?? 0, end }], 0)
+  return { med: medicationFrom(name, scope), scope }
 }
 
 const onlyOne = (values: string[]): string => {
@@ -312,7 +329,7 @@ const onlyOne = (values: string[]): string => {
   return distinct.length === 1 ? distinct[0] : ''
 }
 
-function medicationFrom(name: string, scope: string): Omit<Medication, 'id'> {
+export function medicationFrom(name: string, scope: string): Omit<Medication, 'id'> {
   const freq = FREQUENCY.filter(([, re]) => re.test(scope)).map(([v]) => v)
   const pattern = /\b([01])\s*-\s*([01])\s*-\s*([01])\b/.exec(scope)
   if (pattern) freq.push(`${pattern[1]}-${pattern[2]}-${pattern[3]}`)

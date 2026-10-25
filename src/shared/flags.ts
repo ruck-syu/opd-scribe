@@ -251,6 +251,7 @@ export function computeFlags(
     if (t.status === 'failed')
       warn(`tx.${t.id}.failed`, area, `${what} failed to transcribe: ${t.error || 'unknown error'}`, t.error)
     if (t.status !== 'ready') continue
+    if (t.llmStatus === 'running') block(`tx.${t.id}.llm`, area, `${what}: AI extraction is still running`)
     if (!t.reviewed) warn(`tx.${t.id}.unreviewed`, area, `${what} has not been marked reviewed`)
     const uncertain = t.segments.filter((s) => s.speakerUncertain)
     if (t.kind === 'conversation' && uncertain.length)

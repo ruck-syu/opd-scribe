@@ -194,7 +194,10 @@ export interface Transcript {
   /** proposed field values from the transcript; each enters the note only when accepted */
   suggestions?: Suggestion[]
   /** candidates that were not backed by the transcript, kept visible instead of dropped */
-  rejectedSuggestions?: { quote: string; value: string; reason: string }[]
+  rejectedSuggestions?: { quote: string; value: string; reason: string; engine?: 'rules' | 'llm' }[]
+  /** optional local-LLM extraction (absent = never run) */
+  llmStatus?: 'running' | 'done' | 'failed'
+  llmError?: string
 }
 
 // ---------- Encounters, revisions, verification ----------
@@ -289,10 +292,22 @@ export interface AsrSettings {
   initialPrompt: string // clinic formulary / terminology hint
 }
 
+export type LlmTemplate = 'chatml' | 'gemma' | 'llama3'
+
+/** Optional local LLM (llama.cpp llama-completion) that proposes suggestions; see docs/AI_EXTRACTION.md. */
+export interface LlmSettings {
+  enabled: boolean
+  binaryPath: string
+  modelPath: string
+  threads: number
+  template: LlmTemplate
+}
+
 export interface AppSettings {
   clinic: ClinicSettings
   layout: LayoutSettings
   asr: AsrSettings
+  llm: LlmSettings
   /** STO-04: default delete raw audio after transcript confirmed */
   retainAudio: boolean
   autoLockMinutes: number

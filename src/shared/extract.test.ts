@@ -422,6 +422,22 @@ describe('review fixes', () => {
     expect(m.target).toMatchObject({ kind: 'medication', med: { name: 'Ondansetron', formulationStrength: '4 mg', frequency: '' } })
   })
 
+  it('reads Hinglish "subah shaam" as BD and a stated grade as present', () => {
+    const [m] = kinds([['doctor', 'Paracetamol 650 mg subah shaam']])
+    expect(m.target).toMatchObject({ med: { frequency: 'BD' } })
+    const r = extractRules(transcript([seg('s1', 'Grade 1 neuropathy, likely oxaliplatin related'), seg('s2', 'haathon mein jhunjhuni hai', 'patient')]), {
+      symptoms: [],
+      toxicities: ['Neuropathy'],
+      formulary: []
+    })
+    expect(r.suggestions.filter((x) => x.target.kind === 'finding').map((x) => x.value)).toEqual(['present'])
+  })
+
+  it('keeps a decimal strength: the point in 1.5 mg is not a sentence end', () => {
+    const [m] = kinds([['doctor', 'Ondansetron 1.5 mg BD. Review later']])
+    expect(m.target).toMatchObject({ med: { formulationStrength: '1.5 mg', frequency: 'BD' } })
+  })
+
   it('reads "twice daily" as BD, not as a clash of OD and BD', () => {
     const [m] = kinds([['doctor', 'Take ondansetron 8 mg twice daily for 5 days']])
     expect(m.target).toMatchObject({ med: { frequency: 'BD', duration: '5 days' } })

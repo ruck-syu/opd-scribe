@@ -46,6 +46,10 @@ function platform(): Platform {
       join(app.getPath('userData'), 'whisper'),
       app.isPackaged ? join(process.resourcesPath, 'whisper') : join(app.getAppPath(), 'resources', 'whisper')
     ],
+    llmDirs: [
+      join(app.getPath('userData'), 'llm'),
+      app.isPackaged ? join(process.resourcesPath, 'llm') : join(app.getAppPath(), 'resources', 'llm')
+    ],
     version: app.getVersion(),
     platform: process.platform,
     htmlToPdf,

@@ -33,7 +33,8 @@ Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced. Typecheck clea
 - [x] Rule-based suggestions from the transcript (vitals, ECOG, cycle/day, regimen, checklist findings, formulary medicines, note sections), each with its verbatim quote; anything not backed by the quote is rejected and listed, never applied.
 - [x] Suggestion review panel: accept / dismiss, accept-all for rows without warnings, never overwrites a field, "Not mentioned — fill manually" list; pending suggestions are a review warning.
 - [x] P0 flags: ambiguous medication numbers, relative dates, mixed laterality, finding/text contradictions, double negatives, transcript contradictions; clinic-required sections (Settings › Clinic).
-- [ ] Local LLM extractor (llama.cpp sidecar, one-time model download) behind the same quote gate, for history, assessment and full prescription lines.
+- [x] Optional local AI extractor (llama.cpp `llama-completion`, one-time GGUF download, Settings › AI extraction). Tested on macOS with Qwen3-4B-Instruct Q4_K_M: ~15–30 s per consultation. The model only chooses sections and names medicines; note text is always the speaker's own words, and medication details are read by the rules from that medicine's own words (the model misplaced fields and mistranslated "ulti" as "Urticaria").
+- [ ] Test AI extraction on the Ryzen laptop (speed on CPU / Vulkan) with real recordings.
 - [ ] "Today's patients" list for one-click start.
 - [ ] Laterality check against the oncology summary (needs the summary passed into the flag check).
 

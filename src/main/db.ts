@@ -160,6 +160,7 @@ export class Store {
       clinic: { ...DEFAULT_SETTINGS.clinic, ...saved.clinic },
       layout: { ...DEFAULT_SETTINGS.layout, ...saved.layout },
       asr: { ...DEFAULT_SETTINGS.asr, ...saved.asr },
+      llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
       formats: { ...DEFAULT_SETTINGS.formats, ...saved.formats }
     }
   }
@@ -482,6 +483,13 @@ export class Store {
   /** Transcripts left in 'transcribing' by a crash/quit. */
   interruptedTranscripts(): Transcript[] {
     return this.all(`SELECT json FROM transcripts WHERE json_extract(json, '$.status') = 'transcribing'`).map(
+      (r) => JSON.parse(String(r.json)) as Transcript
+    )
+  }
+
+  /** AI extraction that was running when the app closed. */
+  llmInterrupted(): Transcript[] {
+    return this.all(`SELECT json FROM transcripts WHERE json_extract(json, '$.llmStatus') = 'running'`).map(
       (r) => JSON.parse(String(r.json)) as Transcript
     )
   }

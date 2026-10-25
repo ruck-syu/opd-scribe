@@ -30,6 +30,7 @@ Requires Node.js 22 or newer.
 
 - [docs/CLINIC_GUIDE.md](docs/CLINIC_GUIDE.md) - setup, data location, backup and recovery.
 - [docs/SPEECH_MODEL.md](docs/SPEECH_MODEL.md) - installing the speech engine and models.
+- [docs/AI_EXTRACTION.md](docs/AI_EXTRACTION.md) - optional local AI suggestions, installing the model.
 - [ROADMAP.md](ROADMAP.md) - plan and design rules.
 - [docs/TASKS.md](docs/TASKS.md) - open tasks.
 

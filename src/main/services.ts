@@ -9,6 +9,7 @@ import { extractRules, verifySuggestion, type Suggestion } from '../shared/extra
 import { canVerify, computeFlags } from '../shared/flags'
 import { renderFormBodyHtml, renderFieldsOverlayHtml, sampleSnapshot } from '../shared/formRender'
 import { A4_MM, validateTemplate, type DocKind, type FormTemplate } from '../shared/formTemplate'
+import { buildPrompt, LLM_SCHEMA, parseLlmOutput, sameProposal, type ParseResult } from '../shared/llmExtract'
 import { renderNoteHtml, renderPrescriptionHtml } from '../shared/pdfTemplates'
 import type {
   AppSettings,
@@ -27,6 +28,7 @@ import { createBackup, readBackup } from './backup'
 import { hashPin, readEncrypted, verifyPin, writeEncrypted } from './crypto'
 import { parsePatientCsv } from './csvImport'
 import type { Store } from './db'
+import { checkLlm, resolveLlm, runLlm } from './llm'
 import { calibrationHtml, composePdf, concatPdfs, mmToPt, type Letterhead } from './pdfCompose'
 
 /** Electron-specific capabilities, injected so services stay testable. */
@@ -34,6 +36,8 @@ export interface Platform {
   dataDir: string
   /** folders searched for whisper-cli and a ggml model when Settings paths are empty */
   whisperDirs: string[]
+  /** folders searched for llama-completion and a .gguf model when Settings paths are empty */
+  llmDirs: string[]
   version: string
   platform: string
   htmlToPdf(html: string): Promise<Uint8Array>
@@ -83,6 +87,8 @@ export class Services {
   private user: User | null = null
   private failures = 0
   private lockedUntil = 0
+  /** transcript whose AI extraction is running now; only one run app-wide */
+  private llmBusy: string | null = null
 
   constructor(
     private store: Store,
@@ -94,6 +100,9 @@ export class Services {
     mkdirSync(this.tmpDir, { recursive: true, mode: 0o700 })
     for (const t of store.interruptedTranscripts()) {
       store.saveTranscript({ ...t, status: 'failed', error: 'Interrupted (app closed during transcription) — retry available' })
+    }
+    for (const t of store.llmInterrupted()) {
+      store.saveTranscript({ ...t, llmStatus: 'failed', llmError: 'Interrupted (app closed during AI extraction) — run it again' })
     }
   }
 
@@ -292,8 +301,85 @@ export class Services {
     const priorById = new Map(prior.map((x) => [x.id, x]))
     const freshIds = new Set(fresh.map((x) => x.id))
     const merged = fresh.map((x) => ({ ...x, status: priorById.get(x.id)?.status ?? x.status }))
-    const kept = prior.filter((x) => x.status === 'accepted' && !freshIds.has(x.id))
-    return { ...next, suggestions: [...merged, ...kept], rejectedSuggestions: rejected }
+    // AI suggestions stay as they are (the model is not re-run on every edit), decisions included
+    const kept = prior.filter((x) => x.engine === 'llm' || (x.status === 'accepted' && !freshIds.has(x.id)))
+    const aiRejected = (prev.rejectedSuggestions ?? []).filter((r) => r.engine === 'llm')
+    return { ...next, suggestions: [...merged, ...kept], rejectedSuggestions: [...rejected, ...aiRejected] }
+  }
+
+  private emitProgress(t: Transcript, progress: number | null): void {
+    this.platform.emit('transcripts.changed', { encounterId: t.encounterId, transcriptId: t.id, progress })
+  }
+
+  /** Background AI extraction after a ready transcript. Quietly skipped when off, not installed or busy. */
+  private maybeStartLlm(t: Transcript): void {
+    try {
+      const settings = this.store.getSettings()
+      if (!settings.llm.enabled || this.llmBusy) return
+      const check = checkLlm(resolveLlm(settings.llm, this.platform.llmDirs))
+      if (!check.binaryOk || !check.modelOk) return
+      this.beginLlm(t, settings)
+    } catch (e) {
+      console.error('[llm] could not start extraction:', e instanceof Error ? e.name : 'error')
+    }
+  }
+
+  /** Marks the transcript 'running' and starts the model; the result is merged when it finishes. */
+  private beginLlm(t: Transcript, settings: AppSettings): Transcript {
+    const llm = resolveLlm(settings.llm, this.platform.llmDirs)
+    const checklists = { symptoms: settings.symptomChecklist, toxicities: settings.toxicityChecklist }
+    // the prompt carries PHI; runLlm writes it to the temp dir and deletes it
+    const prompt = buildPrompt(t, { ...checklists, template: settings.llm.template })
+    this.llmBusy = t.id
+    const running = this.store.saveTranscript({ ...t, llmStatus: 'running', llmError: '' })
+    this.emitProgress(t, null)
+    runLlm({ llm, prompt, schema: LLM_SCHEMA, workDir: this.tmpDir })
+      .then((raw) => this.mergeLlm(t, parseLlmOutput(raw, t, checklists)))
+      .catch((e: unknown) => this.failLlm(t, e))
+      .finally(() => {
+        this.llmBusy = null
+        this.emitProgress(t, null)
+      })
+    return running
+  }
+
+  /**
+   * Adds the model's proposals next to the rules. Duplicates of a rules suggestion are dropped; the rest
+   * are re-checked against the transcript as it is now, since the doctor may have edited it while the model ran.
+   */
+  private mergeLlm(t: Transcript, result: ParseResult): void {
+    const cur = this.store.getTranscript(t.id)
+    if (!cur) return // deleted while the model ran
+    const all = cur.suggestions ?? []
+    const rules = all.filter((x) => x.engine !== 'llm')
+    // undecided AI proposals come from an earlier run and are replaced; decided ones stand
+    const keep = all.filter((x) => x.engine !== 'llm' || x.status !== 'pending')
+    const keptIds = new Set(keep.map((x) => x.id))
+    const added: Suggestion[] = []
+    const rejected: NonNullable<Transcript['rejectedSuggestions']> = result.rejected.map((r) => ({ ...r, engine: 'llm' as const }))
+    for (const s of result.suggestions) {
+      if (rules.some((r) => sameProposal(r, s)) || added.some((a) => sameProposal(a, s)) || keptIds.has(s.id)) continue
+      const verdict = verifySuggestion(s, cur)
+      if (verdict.ok) added.push(s)
+      else rejected.push({ quote: s.quote, value: s.value, reason: verdict.reason, engine: 'llm' })
+    }
+    this.store.saveTranscript({
+      ...cur,
+      llmStatus: 'done',
+      llmError: '',
+      suggestions: [...keep, ...added],
+      rejectedSuggestions: [...(cur.rejectedSuggestions ?? []).filter((r) => r.engine !== 'llm'), ...rejected]
+    })
+    this.store.audit('system', 'llm.done', 'transcript', t.id, `suggestions=${added.length} rejected=${rejected.length}`)
+  }
+
+  private failLlm(t: Transcript, e: unknown): void {
+    // error class only: messages must not carry transcript text
+    console.error('[llm] extraction failed:', e instanceof Error ? e.name : 'error')
+    const msg = e instanceof Error ? e.message : 'AI extraction failed'
+    const cur = this.store.getTranscript(t.id)
+    if (cur) this.store.saveTranscript({ ...cur, llmStatus: 'failed', llmError: msg.slice(0, 300) })
+    this.store.audit('system', 'llm.failed', 'transcript', t.id)
   }
 
   private startTranscription(t: Transcript): void {
@@ -311,8 +397,9 @@ export class Services {
       }
     })
       .then((segments) => {
-        this.store.saveTranscript(this.withSuggestions({ ...t, status: 'ready', error: '', segments }, t))
+        const ready = this.store.saveTranscript(this.withSuggestions({ ...t, status: 'ready', error: '', segments }, t))
         this.store.audit('system', 'transcript.ready', 'transcript', t.id, `segments=${segments.length}`)
+        this.maybeStartLlm(ready)
       })
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e)
@@ -398,6 +485,7 @@ export class Services {
           clinic: { ...cur.clinic, ...patch.clinic },
           layout: { ...cur.layout, ...patch.layout },
           asr: { ...cur.asr, ...patch.asr },
+          llm: { ...cur.llm, ...patch.llm },
           letterheadType: cur.letterheadType,
           formats: cur.formats
         }
@@ -437,6 +525,7 @@ export class Services {
         return { pdfs: [{ name: 'calibration', data: pdf }], draft: true }
       },
       'settings.checkAsr': () => (this.requireUser(), checkAsr(resolveAsr(s.getSettings().asr, this.platform.whisperDirs))),
+      'settings.checkLlm': () => (this.requireUser(), checkLlm(resolveLlm(s.getSettings().llm, this.platform.llmDirs))),
       'settings.pickFile': (title, extensions) => (this.requireDoctor(), this.platform.openFile(title, extensions)),
 
       'formats.uploadSample': async (kind) => {
@@ -670,6 +759,21 @@ export class Services {
         s.deleteTranscript(t.id)
         this.audit('transcript.delete', 'transcript', t.id)
       },
+      'transcripts.runLlm': (transcriptId, patientId) => {
+        this.requireUser()
+        const t = s.getTranscript(transcriptId) ?? fail('Transcript not found')
+        const e = this.encounterFor(t.encounterId, patientId)
+        if (e.status === 'verified' || e.status === 'amended') fail('Verified visit is locked')
+        if (t.status !== 'ready') fail('Transcript is not ready')
+        const settings = s.getSettings()
+        if (!settings.llm.enabled) fail('AI extraction is off — turn it on in Settings › AI extraction')
+        const check = checkLlm(resolveLlm(settings.llm, this.platform.llmDirs))
+        if (!check.binaryOk || !check.modelOk) fail(check.message)
+        if (this.llmBusy === t.id || t.llmStatus === 'running') fail('AI extraction is already running for this recording')
+        if (this.llmBusy) fail('AI extraction is already running for another recording — try again when it finishes')
+        this.audit('llm.start', 'transcript', t.id)
+        return this.beginLlm(t, settings)
+      },
       'transcripts.decideSuggestion': (transcriptId, patientId, suggestionId, status) => {
         this.requireUser()
         const t = s.getTranscript(transcriptId) ?? fail('Transcript not found')
@@ -681,7 +785,8 @@ export class Services {
         if (cur.status !== 'pending') fail('Suggestion was already accepted or dismissed')
         if (status === 'accepted') {
           if (!cur.value) fail('A conflicting statement can only be dismissed')
-          if (!verifySuggestion(cur, t).ok) fail('Suggestion no longer matches the transcript — dismiss it')
+          if (!verifySuggestion(cur, t).ok)
+            fail('Suggestion no longer matches the transcript — dismiss it')
         }
         const next = s.saveTranscript({ ...t, suggestions: list.map((x) => (x.id === suggestionId ? { ...x, status } : x)) })
         this.audit(status === 'accepted' ? 'suggestion.accept' : 'suggestion.dismiss', 'transcript', t.id, cur.target.kind)

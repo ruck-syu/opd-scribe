@@ -1,18 +1,19 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { call } from '../api'
-import type { AsrCheck, PreviewResult } from '../../../shared/api'
+import type { AsrCheck, LlmCheck, PreviewResult } from '../../../shared/api'
 import type { AppSettings, AuditEntry, LayoutSettings, Role, User } from '../../../shared/types'
 import { SECTION_TARGETS, type SectionKey } from '../../../shared/sections'
 import { Area, ErrorBox, Field, Modal, Select, fmtDateTime, useAction } from '../components/ui'
 import { PdfPreview } from '../components/PdfPreview'
 import { FormatSection } from './FormatEditor'
 
-type Section = 'clinic' | 'print' | 'format' | 'speech' | 'users' | 'data' | 'audit'
+type Section = 'clinic' | 'print' | 'format' | 'speech' | 'ai' | 'users' | 'data' | 'audit'
 const SECTIONS: [Section, string][] = [
   ['clinic', 'Clinic & checklists'],
   ['print', 'Letterhead & printing'],
   ['format', 'OPD print format'],
   ['speech', 'Speech recognition'],
+  ['ai', 'AI extraction'],
   ['users', 'Users'],
   ['data', 'Backup & restore'],
   ['audit', 'Audit log']
@@ -57,6 +58,7 @@ export function Settings({ user, onRestored }: { user: User; onRestored: () => v
         )}
         {section === 'format' && <FormatSection settings={settings} setSettings={setSettings} busy={busy} role={user.role} />}
         {section === 'speech' && <SpeechSection settings={settings} save={save} busy={busy} />}
+        {section === 'ai' && <LlmSection settings={settings} save={save} busy={busy} />}
         {section === 'users' && <UsersSection me={user} />}
         {section === 'data' && <DataSection onRestored={onRestored} />}
         {section === 'audit' && <AuditSection />}
@@ -298,6 +300,69 @@ function SpeechSection({ settings, save, busy }: SectionProps): ReactNode {
       {check && <div className={`notice ${check.binaryOk && check.modelOk ? 'ok' : ''}`}>{check.message}</div>}
       <div className="actions">
         <button disabled={b2} onClick={() => run(async () => setCheck(await call('settings.checkAsr')))}>
+          Check
+        </button>
+        <button className="primary" disabled={busy || b2} onClick={() => void doSave()}>
+          Save
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LlmSection({ settings, save, busy }: SectionProps): ReactNode {
+  const [llm, setLlm] = useState(settings.llm)
+  const [threads, setThreads] = useState(String(settings.llm.threads))
+  const [check, setCheck] = useState<LlmCheck | null>(null)
+  const { busy: b2, error, run } = useAction()
+  const pick = (k: 'binaryPath' | 'modelPath', title: string, ext: string[]): Promise<unknown> =>
+    run(async () => {
+      const p = await call('settings.pickFile', title, ext)
+      if (p) setLlm((a) => ({ ...a, [k]: p }))
+    })
+  const doSave = (): Promise<unknown> =>
+    run(async () => {
+      await save({ llm: { ...llm, threads: Math.max(1, Math.floor(Number(threads) || 1)) } })
+      setCheck(await call('settings.checkLlm'))
+    })
+  return (
+    <div className="card">
+      <h3>AI extraction (optional)</h3>
+      <label className="check">
+        <input type="checkbox" checked={llm.enabled} onChange={(e) => setLlm({ ...llm, enabled: e.target.checked })} />
+        Run AI extraction on each finished transcript
+      </label>
+      <div className="row">
+        <Field label="llama-completion executable" value={llm.binaryPath} onChange={(v) => setLlm({ ...llm, binaryPath: v })} />
+        <button disabled={b2} onClick={() => pick('binaryPath', 'Choose llama-completion', ['exe', '*'])}>
+          Browse…
+        </button>
+      </div>
+      <div className="row">
+        <Field label="Model file (.gguf)" value={llm.modelPath} onChange={(v) => setLlm({ ...llm, modelPath: v })} />
+        <button disabled={b2} onClick={() => pick('modelPath', 'Choose model', ['gguf'])}>
+          Browse…
+        </button>
+      </div>
+      <div className="row wrap">
+        <Select
+          label="Prompt format"
+          width={260}
+          value={llm.template}
+          onChange={(template) => setLlm({ ...llm, template })}
+          options={[
+            ['chatml', 'ChatML (Qwen and most instruct models)'],
+            ['gemma', 'Gemma'],
+            ['llama3', 'Llama 3']
+          ]}
+        />
+        <Field label="CPU threads" type="number" width={120} value={threads} onChange={setThreads} />
+      </div>
+      <p className="muted small">Runs on this computer only. The model only proposes; every suggestion still needs your acceptance.</p>
+      <ErrorBox error={error} />
+      {check && <div className={`notice ${check.binaryOk && check.modelOk ? 'ok' : ''}`}>{check.message}</div>}
+      <div className="actions">
+        <button disabled={b2} onClick={() => run(async () => setCheck(await call('settings.checkLlm')))}>
           Check
         </button>
         <button className="primary" disabled={busy || b2} onClick={() => void doSave()}>
