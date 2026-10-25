@@ -578,6 +578,57 @@ table {
   transition: width 0.2s;
 }
 
+/* ---------- model downloads ---------- */
+.getting-ready {
+  text-align: left;
+}
+.getting-ready p {
+  margin: 8px 0;
+}
+button.big-download {
+  font-size: 16px;
+  padding: 10px 22px;
+  margin: 12px 0 16px;
+}
+.models {
+  margin-top: 8px;
+}
+.model-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.model-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.model-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.model-progress .error {
+  margin: 0;
+}
+.models-foot {
+  margin-top: 6px;
+}
+details.advanced {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+details.advanced > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
 /* ---------- transcripts ---------- */
 .transcript.failed {
   border-color: #fecdca;

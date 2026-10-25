@@ -69,6 +69,18 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npx electron-vite build
+      - uses: actions/cache@v4
+        with:
+          path: .cache/engines
+          key: engines-${{ runner.os }}-${{ hashFiles('scripts/fetch-engines.mjs') }}
+      - name: Fetch speech and AI engines (Windows)
+        if: runner.os == 'Windows'
+        run: node scripts/fetch-engines.mjs --platform win --arch x64
+      - name: Fetch speech and AI engines (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          node scripts/fetch-engines.mjs --platform mac --arch arm64
+          node scripts/fetch-engines.mjs --platform mac --arch x64
       - run: ${{ matrix.command }} --publish never --config.extraMetadata.version="$VERSION"
         shell: bash
       - uses: actions/upload-artifact@v4

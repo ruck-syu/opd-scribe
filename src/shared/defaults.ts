@@ -76,8 +76,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     combinedPdf: true,
     fontSizePt: 10.5
   },
-  asr: { binaryPath: '', modelPath: '', language: 'hi', threads: 6, initialPrompt: '' },
-  llm: { enabled: false, binaryPath: '', modelPath: '', threads: 6, template: 'chatml' },
+  // threads 0 = automatic (all cores but one)
+  asr: { binaryPath: '', modelPath: '', language: 'hi', threads: 0, initialPrompt: '' },
+  llm: { enabled: false, binaryPath: '', modelPath: '', threads: 0, template: 'chatml' },
   retainAudio: false,
   autoLockMinutes: 10,
   toxicityChecklist: DEFAULT_TOXICITIES,

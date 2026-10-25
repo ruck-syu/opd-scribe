@@ -4,14 +4,16 @@ import type { AsrCheck, LlmCheck, PreviewResult } from '../../../shared/api'
 import type { AppSettings, AuditEntry, LayoutSettings, Role, User } from '../../../shared/types'
 import { SECTION_TARGETS, type SectionKey } from '../../../shared/sections'
 import { Area, ErrorBox, Field, Modal, Select, fmtDateTime, useAction } from '../components/ui'
+import { ModelsPanel, useModels } from '../components/ModelsPanel'
 import { PdfPreview } from '../components/PdfPreview'
 import { FormatSection } from './FormatEditor'
 
-type Section = 'clinic' | 'print' | 'format' | 'speech' | 'ai' | 'users' | 'data' | 'audit'
+type Section = 'clinic' | 'print' | 'format' | 'downloads' | 'speech' | 'ai' | 'users' | 'data' | 'audit'
 const SECTIONS: [Section, string][] = [
   ['clinic', 'Clinic & checklists'],
   ['print', 'Letterhead & printing'],
   ['format', 'OPD print format'],
+  ['downloads', 'Downloads'],
   ['speech', 'Speech recognition'],
   ['ai', 'AI extraction'],
   ['users', 'Users'],
@@ -57,6 +59,7 @@ export function Settings({ user, onRestored }: { user: User; onRestored: () => v
           <PrintSection settings={settings} setSettings={setSettings} save={save} busy={busy} onOpenFormats={() => setSection('format')} />
         )}
         {section === 'format' && <FormatSection settings={settings} setSettings={setSettings} busy={busy} role={user.role} />}
+        {section === 'downloads' && <DownloadsSection />}
         {section === 'speech' && <SpeechSection settings={settings} save={save} busy={busy} />}
         {section === 'ai' && <LlmSection settings={settings} save={save} busy={busy} />}
         {section === 'users' && <UsersSection me={user} />}
@@ -242,6 +245,23 @@ function PrintSection({
   )
 }
 
+/** Threads: 0 means automatic. */
+const threadsValue = (s: string): number => Math.max(0, Math.floor(Number(s) || 0))
+
+function DownloadsSection(): ReactNode {
+  const models = useModels()
+  return (
+    <div className="card">
+      <h3>Downloads</h3>
+      <p className="muted small">
+        Speech recognition and the AI helper are downloaded once. After that, OPD Scribe works without internet. No patient information is
+        sent. A download that stops can be resumed; it continues where it stopped.
+      </p>
+      <ModelsPanel models={models} />
+    </div>
+  )
+}
+
 function SpeechSection({ settings, save, busy }: SectionProps): ReactNode {
   const [asr, setAsr] = useState(settings.asr)
   const [threads, setThreads] = useState(String(settings.asr.threads))
@@ -254,28 +274,15 @@ function SpeechSection({ settings, save, busy }: SectionProps): ReactNode {
     })
   const doSave = (): Promise<unknown> =>
     run(async () => {
-      await save({ asr: { ...asr, threads: Math.max(1, Math.floor(Number(threads) || 1)) } })
+      await save({ asr: { ...asr, threads: threadsValue(threads) } })
       setCheck(await call('settings.checkAsr'))
     })
   return (
     <div className="card">
-      <h3>Offline speech recognition (whisper.cpp)</h3>
+      <h3>Speech recognition</h3>
       <p className="muted small">
-        Point to the whisper-cli executable and a ggml model file. Everything runs on this computer; audio never leaves it. See
-        docs/SPEECH_MODEL.md.
+        Consultations are turned into text on this computer; audio never leaves it. The files come from <b>Downloads</b>.
       </p>
-      <div className="row">
-        <Field label="whisper-cli executable" value={asr.binaryPath} onChange={(v) => setAsr({ ...asr, binaryPath: v })} />
-        <button disabled={b2} onClick={() => pick('binaryPath', 'Choose whisper-cli', ['exe', '*'])}>
-          Browse…
-        </button>
-      </div>
-      <div className="row">
-        <Field label="Model file (.bin)" value={asr.modelPath} onChange={(v) => setAsr({ ...asr, modelPath: v })} />
-        <button disabled={b2} onClick={() => pick('modelPath', 'Choose model', ['bin', 'gguf'])}>
-          Browse…
-        </button>
-      </div>
       <div className="row wrap">
         <Select
           label="Language"
@@ -288,7 +295,6 @@ function SpeechSection({ settings, save, busy }: SectionProps): ReactNode {
             ['auto', 'Auto-detect']
           ]}
         />
-        <Field label="CPU threads" type="number" width={120} value={threads} onChange={setThreads} />
       </div>
       <Area
         label="Vocabulary hint (drug names, regimens, terms the model should expect)"
@@ -297,15 +303,40 @@ function SpeechSection({ settings, save, busy }: SectionProps): ReactNode {
         onChange={(initialPrompt) => setAsr({ ...asr, initialPrompt })}
       />
       <ErrorBox error={error} />
-      {check && <div className={`notice ${check.binaryOk && check.modelOk ? 'ok' : ''}`}>{check.message}</div>}
       <div className="actions">
-        <button disabled={b2} onClick={() => run(async () => setCheck(await call('settings.checkAsr')))}>
-          Check
-        </button>
         <button className="primary" disabled={busy || b2} onClick={() => void doSave()}>
           Save
         </button>
       </div>
+      <details className="advanced">
+        <summary>Advanced</summary>
+        <p className="muted small">
+          Only needed when the files were put in place by hand, or to use a different model. Leave the paths empty to use the downloaded
+          files. See docs/SPEECH_MODEL.md.
+        </p>
+        <div className="row">
+          <Field label="whisper-cli executable" value={asr.binaryPath} onChange={(v) => setAsr({ ...asr, binaryPath: v })} />
+          <button disabled={b2} onClick={() => pick('binaryPath', 'Choose whisper-cli', ['exe', '*'])}>
+            Browse…
+          </button>
+        </div>
+        <div className="row">
+          <Field label="Model file (.bin)" value={asr.modelPath} onChange={(v) => setAsr({ ...asr, modelPath: v })} />
+          <button disabled={b2} onClick={() => pick('modelPath', 'Choose model', ['bin', 'gguf'])}>
+            Browse…
+          </button>
+        </div>
+        <div className="row wrap">
+          <Field label="CPU threads (0 = automatic)" type="number" width={200} value={threads} onChange={setThreads} />
+        </div>
+        <ErrorBox error={error} />
+        {check && <div className={`notice ${check.binaryOk && check.modelOk ? 'ok' : ''}`}>{check.message}</div>}
+        <div className="actions">
+          <button disabled={b2} onClick={() => run(async () => setCheck(await call('settings.checkAsr')))}>
+            Check
+          </button>
+        </div>
+      </details>
     </div>
   )
 }
@@ -322,7 +353,7 @@ function LlmSection({ settings, save, busy }: SectionProps): ReactNode {
     })
   const doSave = (): Promise<unknown> =>
     run(async () => {
-      await save({ llm: { ...llm, threads: Math.max(1, Math.floor(Number(threads) || 1)) } })
+      await save({ llm: { ...llm, threads: threadsValue(threads) } })
       setCheck(await call('settings.checkLlm'))
     })
   return (
@@ -330,45 +361,54 @@ function LlmSection({ settings, save, busy }: SectionProps): ReactNode {
       <h3>AI extraction (optional)</h3>
       <label className="check">
         <input type="checkbox" checked={llm.enabled} onChange={(e) => setLlm({ ...llm, enabled: e.target.checked })} />
-        Run AI extraction on each finished transcript
+        Use the AI helper: suggest where each sentence goes, after each recording
       </label>
-      <div className="row">
-        <Field label="llama-completion executable" value={llm.binaryPath} onChange={(v) => setLlm({ ...llm, binaryPath: v })} />
-        <button disabled={b2} onClick={() => pick('binaryPath', 'Choose llama-completion', ['exe', '*'])}>
-          Browse…
-        </button>
-      </div>
-      <div className="row">
-        <Field label="Model file (.gguf)" value={llm.modelPath} onChange={(v) => setLlm({ ...llm, modelPath: v })} />
-        <button disabled={b2} onClick={() => pick('modelPath', 'Choose model', ['gguf'])}>
-          Browse…
-        </button>
-      </div>
-      <div className="row wrap">
-        <Select
-          label="Prompt format"
-          width={260}
-          value={llm.template}
-          onChange={(template) => setLlm({ ...llm, template })}
-          options={[
-            ['chatml', 'ChatML (Qwen and most instruct models)'],
-            ['gemma', 'Gemma'],
-            ['llama3', 'Llama 3']
-          ]}
-        />
-        <Field label="CPU threads" type="number" width={120} value={threads} onChange={setThreads} />
-      </div>
-      <p className="muted small">Runs on this computer only. The model only proposes; every suggestion still needs your acceptance.</p>
+      <p className="muted small">
+        Runs on this computer only. The helper only proposes; every suggestion still needs your acceptance. Its files come from{' '}
+        <b>Downloads</b>.
+      </p>
       <ErrorBox error={error} />
-      {check && <div className={`notice ${check.binaryOk && check.modelOk ? 'ok' : ''}`}>{check.message}</div>}
       <div className="actions">
-        <button disabled={b2} onClick={() => run(async () => setCheck(await call('settings.checkLlm')))}>
-          Check
-        </button>
         <button className="primary" disabled={busy || b2} onClick={() => void doSave()}>
           Save
         </button>
       </div>
+      <details className="advanced">
+        <summary>Advanced</summary>
+        <p className="muted small">Only needed when the files were put in place by hand. Leave the paths empty to use the downloaded files.</p>
+        <div className="row">
+          <Field label="llama-completion executable" value={llm.binaryPath} onChange={(v) => setLlm({ ...llm, binaryPath: v })} />
+          <button disabled={b2} onClick={() => pick('binaryPath', 'Choose llama-completion', ['exe', '*'])}>
+            Browse…
+          </button>
+        </div>
+        <div className="row">
+          <Field label="Model file (.gguf)" value={llm.modelPath} onChange={(v) => setLlm({ ...llm, modelPath: v })} />
+          <button disabled={b2} onClick={() => pick('modelPath', 'Choose model', ['gguf'])}>
+            Browse…
+          </button>
+        </div>
+        <div className="row wrap">
+          <Select
+            label="Prompt format"
+            width={260}
+            value={llm.template}
+            onChange={(template) => setLlm({ ...llm, template })}
+            options={[
+              ['chatml', 'ChatML (Qwen and most instruct models)'],
+              ['gemma', 'Gemma'],
+              ['llama3', 'Llama 3']
+            ]}
+          />
+          <Field label="CPU threads (0 = automatic)" type="number" width={200} value={threads} onChange={setThreads} />
+        </div>
+        {check && <div className={`notice ${check.binaryOk && check.modelOk ? 'ok' : ''}`}>{check.message}</div>}
+        <div className="actions">
+          <button disabled={b2} onClick={() => run(async () => setCheck(await call('settings.checkLlm')))}>
+            Check
+          </button>
+        </div>
+      </details>
     </div>
   )
 }

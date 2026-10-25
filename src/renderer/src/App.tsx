@@ -3,6 +3,7 @@ import { call, on } from './api'
 import type { AppStatus } from '../../shared/api'
 import type { User } from '../../shared/types'
 import { Setup } from './screens/Setup'
+import { GettingReady } from './screens/GettingReady'
 import { LockScreen } from './screens/Lock'
 import { Patients } from './screens/Patients'
 import { PatientProfile } from './screens/PatientProfile'
@@ -33,9 +34,23 @@ export function App(): ReactNode {
 
   useAutoLock(user, lock)
 
+  // speech files missing at sign-in: offer the download once per sign-in ("Later" or Continue skips it)
+  const [speechReady, setSpeechReady] = useState<boolean | null>(null)
+  const [readySkipped, setReadySkipped] = useState(false)
+  useEffect(() => {
+    setReadySkipped(false)
+    setSpeechReady(null)
+    if (!user) return
+    void call('models.status')
+      .then((list) => setSpeechReady(list.some((m) => m.id === 'speech' && m.state === 'ready')))
+      .catch(() => setSpeechReady(true))
+  }, [user?.id])
+
   if (!status) return <div className="center muted">Loading…</div>
   if (!status.setupDone) return <Setup onDone={refresh} />
   if (!user) return <LockScreen onUnlocked={refresh} />
+  if (speechReady === null) return <div className="center muted">Loading…</div>
+  if (!speechReady && !readySkipped) return <GettingReady onDone={() => setReadySkipped(true)} />
 
   return (
     <div className="shell">

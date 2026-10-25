@@ -5,9 +5,9 @@ OPD Scribe transcribes with [whisper.cpp](https://github.com/ggml-org/whisper.cp
 Windows target (Ryzen CPU, 16 GB RAM, integrated Radeon GPU); the same files work on macOS with the
 Mac binary.
 
-Two independent pieces are needed:
+Two pieces are needed:
 
-1. `whisper-cli.exe` plus the DLLs that ship with it (the engine).
+1. The engine: `whisper-cli` and the libraries it needs. The installer already contains it.
 2. A `ggml-*.bin` model (the weights, including the multilingual tokenizer).
 
 ## How the app finds the engine
@@ -16,7 +16,7 @@ Two independent pieces are needed:
 fills it from these folders, in this order:
 
 1. `%APPDATA%\OPD Scribe\whisper\` (Electron `userData`)
-2. The bundled `resources\whisper\` folder (in a packaged build, next to the app's resources)
+2. The engine bundled with the installer: `engines\whisper\` in the app's resources folder
 
 Auto-discovery is deliberately simple:
 
@@ -36,71 +36,44 @@ After saving, press **Check**. It reports either `Speech engine ready — model 
 The error text uses the older name "Speech engine"; the tab itself is labelled **Speech recognition**.
 The app keeps recordings when the engine is missing so they can be retried after setup.
 
-## Option A: prebuilt whisper.cpp for Windows (recommended first)
+## The engine (installed with the app)
 
-1. Open the releases page: <https://github.com/ggml-org/whisper.cpp/releases>.
-2. Pick a release or nightly build that has Windows x64 assets. Asset names look like
-   `whisper-bin-x64.zip`, `whisper-blas-bin-x64.zip`, and CUDA variants.
-3. Choose the zip:
-   - **A Vulkan x64 build, if that release publishes one.** Vulkan is what puts the Radeon integrated GPU
-     to work.
-   - Otherwise use **`whisper-blas-bin-x64.zip`** (CPU with BLAS) or **`whisper-bin-x64.zip`** (plain
-     CPU). This is the honest current state: whisper.cpp's published Windows zips are usually CPU, BLAS,
-     CUDA, and ARM64/OpenCL builds, and a Windows Vulkan x64 zip is not present in every release. If you
-     want Vulkan and there is no zip, use Option B.
-   - Do **not** use `whisper-bin-Win32.zip` (32-bit), the ARM64 zips, or the CUDA zips on this laptop
-     (it has no NVIDIA GPU).
-4. Extract the zip to a temporary folder. Copy **`whisper-cli.exe` and every `.dll` next to it** into
-   `%APPDATA%\OPD Scribe\whisper\`. Keep them together; the executable will not start if a DLL is left
-   behind. Do not copy the samples or the whole folder tree unless you want them there.
-5. Put the model in the same folder (see [Models](#models)), then open
-   **Settings > Speech recognition**, leave the paths empty if the files are in that folder, and press
-   **Save** then **Check**.
+The Windows and macOS installers already contain the speech engine, so there is nothing to download or copy
+for it. The Windows engine is whisper.cpp's **CPU** build, which means the Radeon GPU is not used for speech.
+Only the model file is needed (see [Models](#models)).
 
-The Vulkan **runtime** is part of the AMD Radeon driver; you do not need the Vulkan SDK just to run a
-Vulkan build. Update the GPU driver through AMD Adrenalin (or the laptop manufacturer's version of it)
-if Vulkan initialisation fails. The SDK is only needed to compile Option B.
+## Advanced: use your own build
 
-If Windows blocks the downloaded executable or DLLs, open the file's Properties and choose **Unblock**,
-or unblock them all in PowerShell:
+Use this only to test another whisper.cpp build, for example a **Vulkan** build that runs on the GPU. Put
+`whisper-cli.exe` and every `.dll` beside it into `%APPDATA%\OPD Scribe\whisper\`. The app checks that folder
+before the bundled engine. Keep the files together: the executable will not start if a DLL is left behind.
+Then press **Save** and **Check** in Settings.
+
+To build Vulkan from source on Windows, install Git, CMake, the Visual Studio 2022 Build Tools (C++ workload)
+and the [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home) (with `VULKAN_SDK` set). In PowerShell:
 
 ```powershell
-Get-ChildItem -File | Where-Object { $_.Extension -in '.exe', '.dll' } | Unblock-File
-```
-
-An antivirus quarantine is also worth checking if `Could not start speech engine` appears immediately.
-
-## Option B: build from source with Vulkan
-
-Prerequisites:
-
-- Git and CMake (the "Desktop development with C++" workload in Visual Studio 2022 Build Tools includes
-  the compiler; select its CMake tools component if the installer did not already).
-- The [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home) for Windows, installed with its
-  `VULKAN_SDK` environment variable set.
-
-In PowerShell:
-
-```powershell
-cd C:\src          # or any working folder
 git clone https://github.com/ggml-org/whisper.cpp
 cd whisper.cpp
 cmake -B build -DGGML_VULKAN=1
 cmake --build build -j --config Release
 ```
 
-With the Visual Studio generator the binary is at `build\bin\Release\whisper-cli.exe`; `quantize.exe` is
-in the same folder. Copy `whisper-cli.exe` and every `.dll` beside it (including the Vulkan backend DLL,
-if the build produced one) into `%APPDATA%\OPD Scribe\whisper\`.
-
-If CMake cannot find Vulkan, open a new terminal after installing the SDK so `VULKAN_SDK` is visible, or
-pass `-DVulkan_INCLUDE_DIR=...`/`-DVulkan_LIBRARY=...` explicitly. Keep the build tree: you will use
-`quantize.exe` from it for a custom model.
+The binary is `build\bin\Release\whisper-cli.exe`; copy it and every `.dll` beside it. The Vulkan runtime comes
+with the AMD Radeon driver; update it through AMD Adrenalin if Vulkan initialisation fails. If CMake cannot find
+Vulkan, open a new terminal after installing the SDK so `VULKAN_SDK` is visible, or pass
+`-DVulkan_INCLUDE_DIR=...`/`-DVulkan_LIBRARY=...` explicitly. Keep the build tree: `quantize.exe` in it is
+needed for a custom model.
 
 To confirm whether the GPU is actually being used, run the manual test below once and watch Task Manager
 (Performance > GPU). `--no-gpu` (`-ng`) forces CPU and is useful for comparison.
 
 ## Models
+
+The app downloads the baseline model below on first run (**Settings › Downloads**, or the Getting ready
+screen) and keeps it in `%APPDATA%\OPD Scribe\models\`. The manual steps in this section are only needed
+for a different model, or when the laptop cannot reach the internet: copy the file onto a USB drive and use
+**Copy the files from a USB drive** on the Downloads page.
 
 The app auto-detects whisper.cpp GGML `.bin` files; the documented and tested path here is a GGML `.bin`,
 not a Hugging Face `.safetensors` file. Settings can point at another file if your whisper.cpp build
@@ -115,7 +88,7 @@ This is the model to get working first. It is multilingual, reasonably fast, and
 - Direct file: <https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin>
   (about 550 MB)
 
-Save it as `ggml-large-v3-turbo-q5_0.bin` in `%APPDATA%\OPD Scribe\whisper\`. The q5_0 quantisation is a
+Installed by the app as `ggml-large-v3-turbo-q5_0.bin` in `%APPDATA%\OPD Scribe\models\`. To do it by hand, save it there or in `%APPDATA%\OPD Scribe\whisper\`. The q5_0 quantisation is a
 good speed/memory compromise; q8_0 is larger and may be slightly more accurate, at the cost of speed and
 RAM.
 
@@ -157,7 +130,7 @@ python models\convert-h5-to-ggml.py C:\models\apex C:\src\whisper C:\models\apex
 ```
 
 The script writes `C:\models\apex-ggml\ggml-model.bin`. Quantise it with the `quantize` tool from the
-Option B build (release zips do not always include it):
+Advanced build above (the installed engine does not include `quantize`):
 
 ```powershell
 C:\src\whisper.cpp\build\bin\Release\quantize.exe `
@@ -235,7 +208,7 @@ indicative only. Time a two-minute sample on the actual machine before promising
 | `Speech model (ggml .bin) not found` | No `ggml-*.bin` at the top level, or a file format whisper.cpp cannot load | Put a `ggml-*.bin` model at the top level of the folder (not a subfolder), or set the model path explicitly. |
 | `Speech engine exited with code …` and a DLL error | A DLL was not copied, or the VC++ runtime is missing | Read the last stderr line in the message; keep every DLL beside the executable, and install the Microsoft Visual C++ Redistributable (x64) if Windows reports a missing runtime. |
 | `Could not start speech engine` | Antivirus/SmartScreen blocked the exe, or the path has gone | Unblock the file, check the path, try running the exe manually from PowerShell to see the error. |
-| Vulkan device/instance errors | Outdated Radeon driver, or the build has no Vulkan backend | Update AMD Adrenalin (or the laptop maker's driver). If it still fails, use the BLAS/CPU build to confirm the model works, then rebuild Vulkan with Option B. |
+| Vulkan device/instance errors | Outdated Radeon driver, or the build has no Vulkan backend | Update AMD Adrenalin (or the laptop maker's driver). If it still fails, use the BLAS/CPU build to confirm the model works, then build Vulkan yourself (see Advanced above). |
 | Very slow (minutes for one minute of audio) | CPU build, a too-large model, or too many threads | Use `large-v3-turbo` q5_0, set threads to physical cores, close other heavy apps, check Task Manager for GPU use, and plug in the laptop. |
 | Fans loud / app sluggish / low memory | 16 GB is shared by Electron, the model, PDF rendering, and Windows | Use q5_0 rather than q8_0 or a full large model; close browser tabs; do not load two models at once. |
 | Repeated words, loops, "thank you for watching" | Whisper hallucination on silence, noise, or music | The app flags the segment with `Repeated words`, `Possible non-speech / hallucinated text`, or `Same text as previous segment`. It never deletes or rewrites it - review the audio and correct the text. Try a quieter room/closer mic. |
@@ -257,7 +230,7 @@ indicative only. Time a two-minute sample on the actual machine before promising
 
 ## Before the first clinic day
 
-1. Put the engine and model in `%APPDATA%\OPD Scribe\whisper\`, press Save, then **Check**.
+1. Make sure **Settings › Downloads** shows speech recognition as *Installed* (or copy the model from USB), and that the engine is in place; then press **Check** under Speech recognition › Advanced.
 2. Record a two-minute Hinglish sample with the real microphone in the real room; time it and read the
    transcript.
 3. Try `hi`, `en`, and `auto`, and pick the setting the doctor prefers.

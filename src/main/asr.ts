@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import { basename, join, sep } from 'node:path'
 import { uid } from '../shared/defaults'
 import type { AsrSettings, TranscriptSegment } from '../shared/types'
+import { threadCount } from './threads'
 
 interface WhisperJson {
   transcription?: { offsets?: { from: number; to: number }; text?: string }[]
@@ -235,7 +236,7 @@ export function withCoverageMarkers(segments: TranscriptSegment[], wav: Buffer):
   return [...segments, ...markers].sort((a, b) => a.startMs - b.startMs)
 }
 
-/** Fill empty engine paths from well-known folders (bundled resources/whisper, userData/whisper). */
+/** Fill empty engine paths from the folders in `dirs`, searched in order (bundled engine, downloaded models, legacy folders). */
 export function resolveAsr(asr: AsrSettings, dirs: string[]): AsrSettings {
   const files = (d: string): string[] => {
     try {
@@ -279,7 +280,7 @@ export function runWhisper({ asr, wav, workDir, onProgress }: RunOptions): Promi
   const base = join(workDir, `asr-${uid()}`)
   const wavPath = `${base}.wav`
   writeFileSync(wavPath, wav, { mode: 0o600 })
-  const args = ['-m', asr.modelPath, '-f', wavPath, '-oj', '-of', base, '-t', String(asr.threads || 4), '-pp']
+  const args = ['-m', asr.modelPath, '-f', wavPath, '-oj', '-of', base, '-t', String(threadCount(asr.threads)), '-pp']
   args.push('-l', asr.language || 'auto')
   if (asr.initialPrompt.trim()) args.push('--prompt', asr.initialPrompt.trim())
 

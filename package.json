@@ -13,7 +13,8 @@
     "test": "vitest run",
     "dist:win": "electron-vite build && electron-builder --win --x64",
     "dist:mac": "electron-vite build && electron-builder --mac",
-    "icons": "electron scripts/make-icons.cjs"
+    "icons": "electron scripts/make-icons.cjs",
+    "engines": "node scripts/fetch-engines.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

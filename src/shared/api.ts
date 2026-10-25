@@ -17,6 +17,7 @@ import type {
   VisitDocument
 } from './types'
 import type { DocKind, FormTemplate } from './formTemplate'
+import type { ImportReport, ModelId, ModelStatus } from './models'
 
 export interface AppStatus {
   setupDone: boolean
@@ -99,6 +100,17 @@ export interface ApiMap {
   'settings.checkLlm': () => LlmCheck
   'settings.pickFile': (title: string, extensions: string[]) => string | null
 
+  /** state of the speech and AI model files (download, partial, ready) */
+  'models.status': () => ModelStatus[]
+  /** start or resume a download in the background; returns the statuses at once */
+  'models.download': (id: ModelId) => ModelStatus[]
+  /** pause: stops the download and keeps the partial file */
+  'models.cancel': (id: ModelId) => ModelStatus[]
+  /** the doctor's choice of the AI helper; when the AI model is (or becomes) ready it is switched on */
+  'models.setAiHelper': (on: boolean) => void
+  /** pick a folder (for example a USB stick) and copy in any model files found there; null if cancelled */
+  'models.importFolder': () => ImportReport | null
+
   /** pick a sample OPD PDF/PNG/JPG, store it encrypted; null if cancelled */
   'formats.uploadSample': (kind: DocKind) => SampleInfo | null
   'formats.sample': (sampleId: string) => { type: 'pdf' | 'png' | 'jpg'; data: Uint8Array } | null
@@ -176,6 +188,11 @@ export const CHANNELS = [
   'settings.checkAsr',
   'settings.checkLlm',
   'settings.pickFile',
+  'models.status',
+  'models.download',
+  'models.cancel',
+  'models.setAiHelper',
+  'models.importFolder',
   'formats.uploadSample',
   'formats.sample',
   'formats.save',
@@ -222,9 +239,10 @@ export const _channelsComplete: Missing extends never ? true : Missing = true
 export interface EventMap {
   'transcripts.changed': { encounterId: string; transcriptId: string; progress: number | null }
   'app.locked': Record<string, never>
+  'models.changed': ModelStatus[]
 }
 export type EventName = keyof EventMap
-export const EVENTS = ['transcripts.changed', 'app.locked'] as const satisfies readonly EventName[]
+export const EVENTS = ['transcripts.changed', 'app.locked', 'models.changed'] as const satisfies readonly EventName[]
 
 export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: string }
 

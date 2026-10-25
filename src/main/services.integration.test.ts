@@ -54,10 +54,12 @@ async function makeHarness(): Promise<Harness> {
     dataDir: dir,
     whisperDirs: [],
     llmDirs: [],
+    engineDirs: { whisper: join(dir, 'engines', 'whisper'), llm: join(dir, 'engines', 'llm'), llmCpu: join(dir, 'engines', 'llm-cpu') },
     version: '0.0.0-test',
     platform: 'test',
     htmlToPdf: async () => pdf,
     openFile: async () => null,
+    openFolder: async () => null,
     saveFile: async () => join(dir, `export-${++saved}.pdf`),
     openPath: async () => {},
     emit: () => {}

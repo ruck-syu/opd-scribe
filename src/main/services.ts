@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import { dirname, extname, join } from 'node:path'
 import { PDFDocument } from 'pdf-lib'
-import type { ApiMap, Channel, PreviewResult } from '../shared/api'
+import type { ApiMap, Channel, EventMap, EventName, PreviewResult } from '../shared/api'
 import { canonicalJson, clinicalContent } from '../shared/canonical'
 import { emptyDocument, uid } from '../shared/defaults'
 import { extractRules, verifySuggestion, type Suggestion } from '../shared/extract'
@@ -10,10 +10,13 @@ import { canVerify, computeFlags } from '../shared/flags'
 import { renderFormBodyHtml, renderFieldsOverlayHtml, sampleSnapshot } from '../shared/formRender'
 import { A4_MM, validateTemplate, type DocKind, type FormTemplate } from '../shared/formTemplate'
 import { buildPrompt, LLM_SCHEMA, parseLlmOutput, sameProposal, type ParseResult } from '../shared/llmExtract'
+import { MODEL_CATALOG, type ModelId } from '../shared/models'
 import { renderNoteHtml, renderPrescriptionHtml } from '../shared/pdfTemplates'
 import type {
   AppSettings,
+  AsrSettings,
   Encounter,
+  LlmSettings,
   OncologySummaryKey,
   Patient,
   PatientInput,
@@ -29,22 +32,26 @@ import { hashPin, readEncrypted, verifyPin, writeEncrypted } from './crypto'
 import { parsePatientCsv } from './csvImport'
 import type { Store } from './db'
 import { checkLlm, resolveLlm, runLlm } from './llm'
+import { ModelManager } from './models'
 import { calibrationHtml, composePdf, concatPdfs, mmToPt, type Letterhead } from './pdfCompose'
 
 /** Electron-specific capabilities, injected so services stay testable. */
 export interface Platform {
   dataDir: string
-  /** folders searched for whisper-cli and a ggml model when Settings paths are empty */
+  /** legacy folders searched for whisper-cli and a ggml model when Settings paths are empty */
   whisperDirs: string[]
-  /** folders searched for llama-completion and a .gguf model when Settings paths are empty */
+  /** legacy folders searched for llama-completion and a .gguf model when Settings paths are empty */
   llmDirs: string[]
+  /** bundled engines: whisper-cli, llama-completion (GPU build) and llama-completion (CPU build) */
+  engineDirs: { whisper: string; llm: string; llmCpu: string }
   version: string
   platform: string
   htmlToPdf(html: string): Promise<Uint8Array>
   openFile(title: string, extensions: string[]): Promise<string | null>
+  openFolder(title: string): Promise<string | null>
   saveFile(title: string, defaultName: string, extensions: string[]): Promise<string | null>
   openPath(path: string): Promise<void>
-  emit(event: 'transcripts.changed', payload: { encounterId: string; transcriptId: string; progress: number | null }): void
+  emit<E extends EventName>(event: E, payload: EventMap[E]): void
 }
 
 type Handlers = { [C in Channel]: (...args: Parameters<ApiMap[C]>) => ReturnType<ApiMap[C]> | Promise<ReturnType<ApiMap[C]>> }
@@ -89,12 +96,23 @@ export class Services {
   private lockedUntil = 0
   /** transcript whose AI extraction is running now; only one run app-wide */
   private llmBusy: string | null = null
+  private readonly models: ModelManager
+  /** the doctor chose the AI helper; applied once, when the AI model is (or becomes) ready */
+  private aiHelperWanted = false
+  /** the GPU build failed on this machine and the CPU build worked; the CPU build is used from then on */
+  private llmCpuOnly = false
 
   constructor(
     private store: Store,
     private readonly key: Buffer,
     private readonly platform: Platform
   ) {
+    this.models = new ModelManager({
+      dir: this.modelsDir,
+      catalog: MODEL_CATALOG,
+      emit: (statuses) => this.platform.emit('models.changed', statuses),
+      onReady: (id) => this.onModelReady(id)
+    })
     mkdirSync(this.audioDir, { recursive: true, mode: 0o700 })
     rmSync(this.tmpDir, { recursive: true, force: true })
     mkdirSync(this.tmpDir, { recursive: true, mode: 0o700 })
@@ -112,9 +130,41 @@ export class Services {
   get tmpDir(): string {
     return join(this.platform.dataDir, 'tmp')
   }
+  /** downloaded (or imported) speech and AI model files */
+  get modelsDir(): string {
+    return join(this.platform.dataDir, 'models')
+  }
   private audioPath(transcriptId: string): string {
     if (!/^[\w-]+$/.test(transcriptId)) fail('Invalid transcript id')
     return join(this.audioDir, `${transcriptId}.enc`)
+  }
+
+  /** Empty speech-engine paths filled from: bundled engine, downloaded models, then legacy folders. */
+  private asrFor(asr: AsrSettings): AsrSettings {
+    return resolveAsr(asr, [this.platform.engineDirs.whisper, this.modelsDir, ...this.platform.whisperDirs])
+  }
+
+  /** Empty AI paths filled the same way. `cpuBinaryPath` is set when a bundled GPU build could fall back to the CPU build. */
+  private llmFor(llm: LlmSettings): { llm: LlmSettings; cpuBinaryPath?: string } {
+    const resolved = resolveLlm(llm, [this.platform.engineDirs.llm, this.modelsDir, ...this.platform.llmDirs])
+    const cpuBinaryPath = resolveLlm({ ...llm, binaryPath: '' }, [this.platform.engineDirs.llmCpu]).binaryPath
+    if (this.llmCpuOnly && cpuBinaryPath) return { llm: { ...resolved, binaryPath: cpuBinaryPath } }
+    const bundled = dirname(resolved.binaryPath) === this.platform.engineDirs.llm
+    return { llm: resolved, cpuBinaryPath: bundled && cpuBinaryPath ? cpuBinaryPath : undefined }
+  }
+
+  /** A model finished downloading or was imported. Only the AI helper changes settings. */
+  private onModelReady(id: ModelId): void {
+    if (id === 'ai' && this.aiHelperWanted) this.enableAiHelper()
+  }
+
+  private enableAiHelper(): void {
+    this.aiHelperWanted = false
+    const cur = this.store.getSettings()
+    const template = MODEL_CATALOG.find((m) => m.id === 'ai')?.template ?? cur.llm.template
+    // only the switch and the prompt format change; any path the doctor set stays as it is
+    this.store.saveSettings({ ...cur, llm: { ...cur.llm, enabled: true, template } })
+    this.audit('models.ai-helper', 'settings', 'llm', 'on')
   }
 
   lock(): void {
@@ -316,7 +366,7 @@ export class Services {
     try {
       const settings = this.store.getSettings()
       if (!settings.llm.enabled || this.llmBusy) return
-      const check = checkLlm(resolveLlm(settings.llm, this.platform.llmDirs))
+      const check = checkLlm(this.llmFor(settings.llm).llm)
       if (!check.binaryOk || !check.modelOk) return
       this.beginLlm(t, settings)
     } catch (e) {
@@ -326,14 +376,23 @@ export class Services {
 
   /** Marks the transcript 'running' and starts the model; the result is merged when it finishes. */
   private beginLlm(t: Transcript, settings: AppSettings): Transcript {
-    const llm = resolveLlm(settings.llm, this.platform.llmDirs)
+    const { llm, cpuBinaryPath } = this.llmFor(settings.llm)
     const checklists = { symptoms: settings.symptomChecklist, toxicities: settings.toxicityChecklist }
     // the prompt carries PHI; runLlm writes it to the temp dir and deletes it
     const prompt = buildPrompt(t, { ...checklists, template: settings.llm.template })
     this.llmBusy = t.id
     const running = this.store.saveTranscript({ ...t, llmStatus: 'running', llmError: '' })
     this.emitProgress(t, null)
-    runLlm({ llm, prompt, schema: LLM_SCHEMA, workDir: this.tmpDir })
+    runLlm({
+      llm,
+      prompt,
+      schema: LLM_SCHEMA,
+      workDir: this.tmpDir,
+      cpuBinaryPath,
+      onCpuFallback: () => {
+        this.llmCpuOnly = true
+      }
+    })
       .then((raw) => this.mergeLlm(t, parseLlmOutput(raw, t, checklists)))
       .catch((e: unknown) => this.failLlm(t, e))
       .finally(() => {
@@ -387,7 +446,7 @@ export class Services {
     const wav = readEncrypted(this.key, this.audioPath(t.id))
     let last = -1
     runWhisper({
-      asr: resolveAsr(settings.asr, this.platform.whisperDirs),
+      asr: this.asrFor(settings.asr),
       wav,
       workDir: this.tmpDir,
       onProgress: (pct) => {
@@ -524,9 +583,35 @@ export class Services {
         )
         return { pdfs: [{ name: 'calibration', data: pdf }], draft: true }
       },
-      'settings.checkAsr': () => (this.requireUser(), checkAsr(resolveAsr(s.getSettings().asr, this.platform.whisperDirs))),
-      'settings.checkLlm': () => (this.requireUser(), checkLlm(resolveLlm(s.getSettings().llm, this.platform.llmDirs))),
+      'settings.checkAsr': () => (this.requireUser(), checkAsr(this.asrFor(s.getSettings().asr))),
+      'settings.checkLlm': () => (this.requireUser(), checkLlm(this.llmFor(s.getSettings().llm).llm)),
       'settings.pickFile': (title, extensions) => (this.requireDoctor(), this.platform.openFile(title, extensions)),
+
+      'models.status': () => (this.requireUser(), this.models.status()),
+      'models.download': async (id) => {
+        this.requireUser()
+        await this.models.download(id)
+        return this.models.status()
+      },
+      'models.cancel': async (id) => {
+        this.requireUser()
+        await this.models.cancel(id)
+        return this.models.status()
+      },
+      'models.setAiHelper': (on) => {
+        // switching the AI helper on changes clinic-wide settings, so it is a doctor's choice (as in Settings)
+        this.requireDoctor()
+        this.aiHelperWanted = on
+        if (on && this.models.isReady('ai')) this.enableAiHelper()
+      },
+      'models.importFolder': async () => {
+        this.requireUser()
+        const folder = await this.platform.openFolder('Choose the folder with the OPD Scribe model files')
+        if (!folder) return null
+        const report = await this.models.importFrom(folder)
+        this.audit('models.import', 'settings', 'models', `imported=${report.imported.length} rejected=${report.rejected.length}`)
+        return report
+      },
 
       'formats.uploadSample': async (kind) => {
         this.requireDoctor()
@@ -767,7 +852,7 @@ export class Services {
         if (t.status !== 'ready') fail('Transcript is not ready')
         const settings = s.getSettings()
         if (!settings.llm.enabled) fail('AI extraction is off — turn it on in Settings › AI extraction')
-        const check = checkLlm(resolveLlm(settings.llm, this.platform.llmDirs))
+        const check = checkLlm(this.llmFor(settings.llm).llm)
         if (!check.binaryOk || !check.modelOk) fail(check.message)
         if (this.llmBusy === t.id || t.llmStatus === 'running') fail('AI extraction is already running for this recording')
         if (this.llmBusy) fail('AI extraction is already running for another recording — try again when it finishes')

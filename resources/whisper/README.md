@@ -1,8 +1,6 @@
-# Speech engine files (not committed)
+# Not packaged
 
-The app transcribes offline with [whisper.cpp](https://github.com/ggml-org/whisper.cpp).
-Put the files here (or anywhere, and set the paths in **Settings → Speech engine**):
-
-- `whisper-cli` (macOS) / `whisper-cli.exe` (Windows) and the DLLs it ships with.
-  For the Ryzen laptop use a **Vulkan** build so the Radeon iGPU is used.
-- A ggml model file, e.g. `ggml-apex-q5_0.bin` (see `docs/SPEECH_MODEL.md`).
+The installer does not read this folder. The speech and AI engines are fetched by
+`npm run engines -- --platform win --arch x64` (or `mac --arch arm64` / `mac --arch x64`) into
+`resources/engines/<os>-<arch>/`, and electron-builder copies them into the app as `engines/`.
+See `docs/SPEECH_MODEL.md`. Model files (`ggml-*.bin`, `*.gguf`) are not bundled.

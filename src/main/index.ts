@@ -40,8 +40,13 @@ async function htmlToPdf(html: string): Promise<Uint8Array> {
 }
 
 function platform(): Platform {
+  // bundled engines: resources/engines/{whisper,llm,llm-cpu} when packaged, one folder per OS and CPU in development
+  const engines = app.isPackaged
+    ? join(process.resourcesPath, 'engines')
+    : join(app.getAppPath(), 'resources', 'engines', `${process.platform === 'win32' ? 'win' : 'mac'}-${process.arch}`)
   return {
     dataDir: app.getPath('userData'),
+    engineDirs: { whisper: join(engines, 'whisper'), llm: join(engines, 'llm'), llmCpu: join(engines, 'llm-cpu') },
     whisperDirs: [
       join(app.getPath('userData'), 'whisper'),
       app.isPackaged ? join(process.resourcesPath, 'whisper') : join(app.getAppPath(), 'resources', 'whisper')
@@ -55,6 +60,10 @@ function platform(): Platform {
     htmlToPdf,
     async openFile(title, extensions) {
       const r = await dialog.showOpenDialog(win!, { title, properties: ['openFile'], filters: [{ name: title, extensions }] })
+      return r.canceled ? null : (r.filePaths[0] ?? null)
+    },
+    async openFolder(title) {
+      const r = await dialog.showOpenDialog(win!, { title, properties: ['openDirectory'] })
       return r.canceled ? null : (r.filePaths[0] ?? null)
     },
     async saveFile(title, defaultName, extensions) {

@@ -3,8 +3,9 @@ import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join, sep } from 'node:path'
 import { uid } from '../shared/defaults'
 import type { LlmSettings } from '../shared/types'
+import { threadCount } from './threads'
 
-/** Fill empty LLM paths from well-known folders (bundled resources/llm, userData/llm). */
+/** Fill empty LLM paths from the folders in `dirs`, searched in order (bundled engine, downloaded models, legacy folders). */
 export function resolveLlm(llm: LlmSettings, dirs: string[]): LlmSettings {
   const files = (d: string): string[] => {
     try {
@@ -39,15 +40,21 @@ export interface LlmRunOptions {
   schema: Record<string, unknown>
   workDir: string
   timeoutMs?: number
+  /** CPU-only build, tried once when `llm.binaryPath` fails before printing anything */
+  cpuBinaryPath?: string
+  /** called only after the CPU build succeeded, so the choice can be kept for the session */
+  onCpuFallback?: () => void
 }
+
+type Attempt = { ok: true; out: string } | { ok: false; error: Error; beforeOutput: boolean }
 
 /**
  * Run llama-completion once with a JSON grammar and return its stdout. The prompt and schema files
  * are written to workDir and always removed. Errors carry no stderr text: the prompt may echo PHI.
  */
-export function runLlm({ llm, prompt, schema, workDir, timeoutMs = 300_000 }: LlmRunOptions): Promise<string> {
+export async function runLlm({ llm, prompt, schema, workDir, timeoutMs = 300_000, cpuBinaryPath, onCpuFallback }: LlmRunOptions): Promise<string> {
   const check = checkLlm(llm)
-  if (!check.binaryOk || !check.modelOk) return Promise.reject(new Error(check.message))
+  if (!check.binaryOk || !check.modelOk) throw new Error(check.message)
 
   const base = join(workDir, `llm-${uid()}`)
   const promptPath = `${base}.prompt.txt`
@@ -61,7 +68,7 @@ export function runLlm({ llm, prompt, schema, workDir, timeoutMs = 300_000 }: Ll
     writeFileSync(schemaPath, JSON.stringify(schema), { mode: 0o600 })
   } catch (e) {
     cleanup()
-    return Promise.reject(e instanceof Error ? e : new Error(String(e)))
+    throw e instanceof Error ? e : new Error(String(e))
   }
 
   const args = [
@@ -81,28 +88,41 @@ export function runLlm({ llm, prompt, schema, workDir, timeoutMs = 300_000 }: Ll
     '-c',
     '8192',
     '-t',
-    String(llm.threads || 4),
+    String(threadCount(llm.threads)),
     '--no-display-prompt',
     '--simple-io'
   ]
 
-  return new Promise<string>((resolve, reject) => {
+  try {
+    const first = await attempt(llm.binaryPath, args, timeoutMs)
+    if (first.ok) return first.out
+    // a GPU build that dies before printing anything (driver trouble) gets one retry on the CPU build
+    if (!cpuBinaryPath || !first.beforeOutput || cpuBinaryPath === llm.binaryPath) throw first.error
+    const second = await attempt(cpuBinaryPath, args, timeoutMs)
+    if (!second.ok) throw second.error
+    onCpuFallback?.()
+    return second.out
+  } finally {
+    cleanup()
+  }
+}
+
+function attempt(binary: string, args: string[], timeoutMs: number): Promise<Attempt> {
+  return new Promise<Attempt>((resolve) => {
     let settled = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const finish = (err: Error | null, out = ''): void => {
+    const finish = (result: Attempt): void => {
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
-      cleanup()
-      if (err) reject(err)
-      else resolve(out)
+      resolve(result)
     }
 
     let child: ChildProcess
     try {
-      child = spawn(llm.binaryPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      child = spawn(binary, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     } catch {
-      finish(new Error('Could not start AI extraction'))
+      finish({ ok: false, error: new Error('Could not start AI extraction'), beforeOutput: true })
       return
     }
     let out = ''
@@ -114,12 +134,14 @@ export function runLlm({ llm, prompt, schema, workDir, timeoutMs = 300_000 }: Ll
     child.stderr?.resume()
     timer = setTimeout(() => {
       child.kill()
-      finish(new Error('AI extraction timed out'))
+      finish({ ok: false, error: new Error('AI extraction timed out'), beforeOutput: false })
     }, timeoutMs)
-    child.on('error', (e) => finish(new Error(`Could not start AI extraction: ${e.message}`)))
+    child.on('error', (e) =>
+      finish({ ok: false, error: new Error(`Could not start AI extraction: ${e.message}`), beforeOutput: true })
+    )
     child.on('close', (code) => {
-      if (code !== 0) finish(new Error(`AI extraction exited with code ${code}`))
-      else finish(null, out)
+      if (code === 0) finish({ ok: true, out })
+      else finish({ ok: false, error: new Error(`AI extraction exited with code ${code}`), beforeOutput: out.length === 0 })
     })
   })
 }

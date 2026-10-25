@@ -24,15 +24,22 @@ development and build instructions see the [README](../README.md).
      that format. Preview it, then save. If no custom format is saved, the built-in format is used. Empty
      or unmapped fields still print "Not documented"; verified revisions keep the format version they were
      rendered with.
-   - **Speech recognition** - paths for `whisper-cli` and a `ggml-*.bin` model, language, CPU threads, and
-     a vocabulary hint. Press **Check** to confirm both files are found.
+   - **Downloads** - the speech and AI helper files: progress, pause, resume, retry, or copy them from a USB
+     drive. The same rows as the Getting ready screen.
+   - **Speech recognition** - language and a vocabulary hint. Under **Advanced** are the manual file paths
+     and CPU threads (0 = automatic); leave them empty unless support asks.
    - **Users** - add Staff accounts for registration and drafting, and additional Doctor accounts. Each
      user gets a PIN. Doctors can reset PINs and deactivate users.
    - **Backup & restore** - create a passphrase-encrypted `.opdbackup` file and restore from one.
    - **Audit log** - the latest 300 actions (logins, patient and summary changes, verification, export,
      backup, settings).
-4. Set up speech following [docs/SPEECH_MODEL.md](docs/SPEECH_MODEL.md), then record a short test.
-5. Create the first encrypted backup and store it on a USB drive kept away from the laptop.
+4. Then **Getting ready** appears. Press **Download**: speech recognition (about 574 MB, required) and the
+   AI helper (about 2.5 GB, optional, ticked by default) are downloaded once. Keep the laptop online until
+   both rows say *Installed*; a stopped download can be paused and resumed. With no internet at the clinic,
+   press *No internet here?* and choose a USB drive holding the model files. **Later** lets you start
+   typing notes; the same screen returns at sign-in until the speech files are installed.
+5. Record a short test consultation to check speech recognition.
+6. Create the first encrypted backup and store it on a USB drive kept away from the laptop.
 
 ## Recording consent
 
@@ -52,6 +59,7 @@ Electron's `userData` folder is `%APPDATA%\OPD Scribe` on Windows (typically
   data.key        data key, encrypted with Windows DPAPI via Electron safeStorage
   audio\          one encrypted WAV per transcript; deleted after review unless retention is on
   tmp\            scratch files for speech recognition; recreated at startup
+  models\         downloaded (or USB-copied) speech and AI model files (not patient data)
   whisper\        optional whisper-cli.exe + DLLs + ggml model (not patient data)
 ```
 

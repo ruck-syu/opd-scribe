@@ -5,5 +5,7 @@ dist/
 .DS_Store
 resources/whisper/*
 !resources/whisper/README.md
+resources/engines/
+.cache/
 models/
 release/

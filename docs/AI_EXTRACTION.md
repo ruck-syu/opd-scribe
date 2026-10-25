@@ -36,23 +36,27 @@ never included in "Accept all without warnings"; accept them one at a time.
 
 ## Install (once)
 
-The app never downloads a model. The clinic installs these files by hand.
+The app downloads the AI helper's model itself (about 2.5 GB, optional), either on the Getting ready screen
+after first-time setup or later under **Settings › Downloads**. The engine is already part of the installer.
 
-1. **The engine.** From the llama.cpp releases page (<https://github.com/ggml-org/llama.cpp/releases>), take
-   the Windows x64 zip with the Vulkan build, the same kind of build used for whisper on the Ryzen laptop.
-   Extract it to a temporary folder and copy **`llama-completion.exe` and every `.dll` next to it** into
-   `%APPDATA%\OPD Scribe\llm\`. Keep them together. On macOS, use the `llama-completion` binary from the
-   macOS build.
-2. **The model.** Use a 4B-class instruct model in GGUF **Q4_K_M** format. The recommended model is
-   **Qwen3-4B-Instruct-2507** (about 2.5 GB, chat template **chatml**). Download a `.gguf` file once and
-   copy it into the same `%APPDATA%\OPD Scribe\llm\` folder. Keep one `.gguf` file there, or set the path
-   explicitly in Settings.
-3. **Settings.** Open **Settings › AI extraction**. Tick *Run AI extraction on each finished transcript*.
-   Leave the paths empty if the files are in the folder above, or use **Browse…** to point at them. Choose
-   the prompt format that matches the model (ChatML for Qwen). Press **Save**, then **Check**.
+1. **The engine.** Already in the installer: `llama-completion` and the libraries it needs. Windows uses the
+   Vulkan build with a CPU fallback; macOS has arm64 and Intel builds. Nothing to install.
+2. **The model.** The recommended model is **Qwen3-4B-Instruct-2507** (Q4_K_M, about 2.5 GB, chat template
+   **chatml**). The app fetches it from its fixed address and checks its size and SHA-256 before using it.
+   With no internet at the clinic, copy the `.gguf` file onto a USB drive and press **Copy the files from a
+   USB drive** under **Settings › Downloads**.
+3. **Settings.** Open **Settings › AI extraction**, tick *Use the AI helper*, and press **Save**. Choosing the
+   helper on the Getting ready screen also sets the prompt format to ChatML. Leave the paths under
+   **Advanced** empty (the downloaded model is found automatically); use them only to point at files
+   installed by hand. Then press **Check** under Advanced.
 
 **Check** reports `AI extraction ready — model <name>` when both files are found. Otherwise it names the
 missing file.
+
+### Advanced: use your own build
+
+To replace the bundled engine, extract a llama.cpp build and copy `llama-completion.exe` (`llama-completion` on
+macOS) and every `.dll` (`.dylib`) beside it into `%APPDATA%\OPD Scribe\llm\`. Keep them together.
 
 ## Using it
 

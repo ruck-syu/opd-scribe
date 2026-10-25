@@ -7,11 +7,12 @@ files:
   - out/**
   - package.json
   - '!**/*.map'
-# whisper-cli + DLLs + ggml model, if present in resources/whisper (see docs/SPEECH_MODEL.md)
+# Speech and AI engines, written by `node scripts/fetch-engines.mjs` (see docs/SPEECH_MODEL.md).
+# ${os} is win|mac and ${arch} is x64|arm64, so each build copies only its own folder. Lands at
+# process.resourcesPath/engines/{whisper,llm,llm-cpu}. Models (.bin/.gguf) are not bundled.
 extraResources:
-  - from: resources/whisper
-    to: whisper
-    filter: ['**/*', '!README.md']
+  - from: resources/engines/${os}-${arch}
+    to: engines
 # Space-free artifact names: GitHub rewrites spaces to dots on upload, which would
 # make the published SHA256SUMS.txt unusable against the downloaded file names.
 win:
