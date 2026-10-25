@@ -2,6 +2,7 @@
 // Schema rule (PRD §6.2): empty strings / nulls / 'not_assessed' are NEVER clinical negatives.
 
 import type { FormatSettings } from './formTemplate'
+import type { SectionKey } from './sections'
 
 export const SCHEMA_VERSION = 1
 
@@ -294,6 +295,8 @@ export interface AppSettings {
   symptomChecklist: string[]
   /** clinic formulary; used only to flag possible misspellings, never to change a prescription */
   formulary: string[]
+  /** sections that must have text before a visit can be verified (clinic policy) */
+  requiredFields: SectionKey[]
   /** letterhead file stored encrypted in app data; only its type is in settings */
   letterheadType: '' | 'pdf' | 'png' | 'jpg'
   /** custom print formats built from an uploaded sample; null = built-in format */

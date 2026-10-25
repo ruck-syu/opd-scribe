@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { canVerify, computeFlags } from './flags'
 import { DEFAULT_SETTINGS, emptyDocument } from './defaults'
-import type { Medication, Patient, Transcript } from './types'
+import type { Finding, Medication, Patient, Transcript, VisitDocument } from './types'
 
 const patient: Patient = {
   id: 'p1',
@@ -191,5 +191,308 @@ describe('clinic formulary', () => {
     computeFlags(patient, doc, [], ['ondansetron'])
     expect(doc.prescription.medications).toEqual(snapshot)
     expect(doc.prescription.medications[0].name).toBe('Ondansetrn')
+  })
+})
+
+/** Flags whose id matches the rule prefix; the rules under test are all warnings unless stated. */
+const ruleIds = (f: { id: string }[], prefix: string): string[] => f.map((x) => x.id).filter((id) => id.startsWith(prefix))
+
+const withDoc = (edit: (d: VisitDocument) => void): VisitDocument => {
+  const doc = emptyDocument(DEFAULT_SETTINGS, '2026-10-21T10:00')
+  edit(doc)
+  return doc
+}
+
+const medDoc = (fields: Partial<Medication>): VisitDocument =>
+  withDoc((d) => d.prescription.medications.push({ ...med('m1', 'Ondansetron'), ...fields }))
+
+describe('ambiguous medication numbers', () => {
+  const issuesFor = (fields: Partial<Medication>): string[] =>
+    ruleIds(computeFlags(patient, medDoc(fields), []), 'rx.m1.ambiguous')
+
+  it('does not flag clear amounts', () => {
+    expect(issuesFor({ dose: '0.5 mg' })).toEqual([])
+    expect(issuesFor({ dose: '8 mg', formulationStrength: '4 mg/ml', quantity: '10' })).toEqual([])
+    expect(issuesFor({ dose: '1 tab', frequency: 'twice daily', duration: '3 days' })).toEqual([])
+    expect(issuesFor({ dose: '500 µg' })).toEqual([])
+  })
+
+  it('treats 1-0-1 schedule notation as normal, not a range', () => {
+    expect(issuesFor({ frequency: '1-0-1' })).toEqual([])
+    expect(issuesFor({ frequency: '1 - 0 - 1 after food' })).toEqual([])
+    expect(issuesFor({ frequency: '0-0-1' })).toEqual([])
+  })
+
+  it('flags a decimal without a leading zero', () => {
+    expect(issuesFor({ dose: '.5 mg' })).toEqual(['rx.m1.ambiguous'])
+    const flag = computeFlags(patient, medDoc({ dose: '.5 mg' }), []).find((f) => f.id === 'rx.m1.ambiguous')
+    expect(flag?.severity).toBe('warning')
+    expect(flag?.message).toContain('missing leading zero')
+  })
+
+  it('flags a trailing zero', () => {
+    const flag = computeFlags(patient, medDoc({ dose: '5.0 mg' }), []).find((f) => f.id === 'rx.m1.ambiguous')
+    expect(flag?.message).toContain('trailing zero')
+    expect(issuesFor({ dose: '1.05 mg' })).toEqual([])
+  })
+
+  it('flags ranges and fractions', () => {
+    expect(issuesFor({ dose: '1-2 tab' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ dose: '1 to 2 tab' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ frequency: '6-8 hourly' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ dose: '1/2 tab' })).toEqual(['rx.m1.ambiguous'])
+  })
+
+  it('flags a dose or strength with no unit, but not a bare quantity', () => {
+    expect(computeFlags(patient, medDoc({ dose: '8' }), []).find((f) => f.id === 'rx.m1.ambiguous')?.message).toContain('no unit')
+    expect(issuesFor({ formulationStrength: '4' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ quantity: '10' })).toEqual([])
+  })
+
+  it('flags error-prone abbreviations', () => {
+    expect(issuesFor({ dose: '10 u' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ dose: '1000 IU' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ quantity: '2 cc' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ frequency: 'QD' })).toEqual(['rx.m1.ambiguous'])
+    expect(issuesFor({ dose: '500 ug' })).toEqual(['rx.m1.ambiguous'])
+    // "units" and "cubic" are not the abbreviation
+    expect(issuesFor({ dose: '10 units', duration: 'cubic' })).toEqual([])
+  })
+
+  it('gives one flag per medication listing every issue, keyed to the field values', () => {
+    const doc = medDoc({ dose: '.5 mg', frequency: '1-2 times' })
+    const flags = computeFlags(patient, doc, [])
+    const mine = flags.filter((f) => f.id === 'rx.m1.ambiguous')
+    expect(mine).toHaveLength(1)
+    expect(mine[0].message).toContain('dose ".5 mg"')
+    expect(mine[0].message).toContain('frequency "1-2 times"')
+    doc.prescription.medications[0].dose = '0.5 mg'
+    const after = computeFlags(patient, doc, []).find((f) => f.id === 'rx.m1.ambiguous')
+    expect(after?.ackKey).not.toBe(mine[0].ackKey)
+  })
+})
+
+describe('relative dates', () => {
+  const dateIds = (doc: VisitDocument): string[] => ruleIds(computeFlags(patient, doc, []), 'date.')
+
+  it('flags vague references in follow-up, treatment dates and plan', () => {
+    const doc = withDoc((d) => {
+      d.prescription.followUp = { text: 'Review next week', sources: [] }
+      d.oncology.lastTreatmentDate = 'kal'
+      d.oncology.nextPlannedTreatment = 'parso'
+      d.plan = { text: 'Start C2 tomorrow', sources: [] }
+    })
+    expect(dateIds(doc)).toEqual(
+      expect.arrayContaining([
+        'date.followUp.relative',
+        'date.lastTreatmentDate.relative',
+        'date.nextPlannedTreatment.relative',
+        'date.plan.relative'
+      ])
+    )
+    const flag = computeFlags(patient, doc, []).find((f) => f.id === 'date.followUp.relative')
+    expect(flag?.severity).toBe('warning')
+    expect(flag?.message).toContain('ambiguous on paper')
+    expect(flag?.message).toContain('explicit date')
+  })
+
+  it('flags "after some days", weekday names and SOS follow-up', () => {
+    expect(dateIds(withDoc((d) => (d.prescription.followUp.text = 'Review after some days')))).toEqual(['date.followUp.relative'])
+    expect(dateIds(withDoc((d) => (d.plan.text = 'Review on Monday')))).toEqual(['date.plan.relative'])
+    expect(dateIds(withDoc((d) => (d.prescription.followUp.text = 'SOS')))).toEqual(['date.followUp.relative'])
+  })
+
+  it('does not flag explicit dates', () => {
+    expect(dateIds(withDoc((d) => (d.prescription.followUp.text = 'Review on 2026-11-02')))).toEqual([])
+    expect(dateIds(withDoc((d) => (d.plan.text = 'Review on Monday 2 Nov')))).toEqual([])
+    expect(dateIds(withDoc((d) => (d.prescription.followUp.text = 'Review next week, 02/11/2026')))).toEqual([])
+    expect(dateIds(withDoc((d) => (d.oncology.lastTreatmentDate = '2026-10-01')))).toEqual([])
+  })
+
+  it('does not treat SOS medicines in the plan as a follow-up date', () => {
+    expect(dateIds(withDoc((d) => (d.plan.text = 'Tab paracetamol SOS for fever')))).toEqual([])
+  })
+
+  it('does not match words that only contain a trigger', () => {
+    expect(dateIds(withDoc((d) => (d.plan.text = 'Kalpana to continue; parsoning not needed')))).toEqual([])
+  })
+})
+
+describe('laterality', () => {
+  const latIds = (d: VisitDocument): string[] => ruleIds(computeFlags(patient, d, []), 'lat.')
+
+  it('does not flag a single side', () => {
+    expect(latIds(withDoc((d) => (d.history.hpi.text = 'left breast lump for 3 months')))).toEqual([])
+  })
+
+  it('flags both sides mentioned in one section', () => {
+    const doc = withDoc((d) => (d.examination.text = 'Left breast lump 3 cm. Right axilla node palpable'))
+    expect(latIds(doc)).toEqual(['lat.examination.mixed'])
+    expect(latIds(withDoc((d) => (d.examination.text = 'left breast lump, right axilla node')))).toEqual(['lat.examination.mixed'])
+  })
+
+  it('accepts the Hindi and short forms', () => {
+    expect(latIds(withDoc((d) => (d.history.hpi.text = 'baayan stan mein gaanth, daayan taraf bhi'))))
+      .toEqual(['lat.history.hpi.mixed'])
+    expect(latIds(withDoc((d) => (d.examination.text = 'Lt breast mass; rt axilla')))).toEqual(['lat.examination.mixed'])
+  })
+
+  it('does not treat R-CHOP, bright or rt-PCR as a side', () => {
+    expect(latIds(withDoc((d) => (d.plan.text = 'Continue R-CHOP; bright spot on scan; left lung nodule'))))
+      .toEqual([])
+    expect(latIds(withDoc((d) => (d.plan.text = 'rt-PCR sent; left arm swelling')))).toEqual([])
+  })
+
+  it('checks each section on its own', () => {
+    const doc = withDoc((d) => {
+      d.history.hpi.text = 'left breast lump'
+      d.examination.text = 'right axilla node'
+    })
+    expect(latIds(doc)).toEqual([])
+  })
+})
+
+describe('negation and contradiction', () => {
+  const nausea = (d: VisitDocument): Finding => d.oncology.toxicities.find((f) => f.name === 'Nausea / vomiting')!
+  const contraIds = (d: VisitDocument): string[] => ruleIds(computeFlags(patient, d, []), 'contra.')
+
+  it('flags a finding marked absent that the narrative affirms', () => {
+    const doc = withDoc((d) => {
+      nausea(d).state = 'absent'
+      d.history.hpi.text = 'nausea since 2 days'
+    })
+    const id = `contra.${nausea(doc).id}`
+    expect(contraIds(doc)).toEqual([id])
+    const flag = computeFlags(patient, doc, []).find((f) => f.id === id)
+    expect(flag?.severity).toBe('warning')
+    expect(flag?.message).toContain('marked absent')
+    expect(flag?.message).toContain('nausea since 2 days')
+  })
+
+  it('flags a finding marked present that the narrative denies', () => {
+    const doc = withDoc((d) => {
+      nausea(d).state = 'present'
+      d.history.chiefComplaints.text = 'Patient denies nausea'
+    })
+    expect(contraIds(doc)).toEqual([`contra.${nausea(doc).id}`])
+    const doc2 = withDoc((d) => {
+      nausea(d).state = 'present'
+      d.history.hpi.text = 'nausea nahi hai'
+    })
+    expect(contraIds(doc2)).toEqual([`contra.${nausea(doc2).id}`])
+  })
+
+  it('does not flag consistent statements', () => {
+    const denied = withDoc((d) => {
+      nausea(d).state = 'absent'
+      d.history.hpi.text = 'Denies nausea, vomiting. No pain.'
+    })
+    expect(contraIds(denied)).toEqual([])
+    const resolved = withDoc((d) => {
+      nausea(d).state = 'absent'
+      d.history.hpi.text = 'Nausea resolved with antiemetic'
+    })
+    expect(contraIds(resolved)).toEqual([])
+    const unassessed = withDoc((d) => (d.history.hpi.text = 'nausea since 2 days'))
+    expect(contraIds(unassessed)).toEqual([])
+  })
+
+  it('does not flag a present finding when the narrative also affirms it', () => {
+    const doc = withDoc((d) => {
+      nausea(d).state = 'present'
+      d.history.hpi.text = 'No fever, but nausea since 2 days'
+    })
+    expect(contraIds(doc)).toEqual([])
+  })
+
+  it('flags a double negative in free text, but not "no evidence of disease" or "not tolerating"', () => {
+    const flagged = withDoc((d) => (d.plan.text = 'Pain not without food; chemo deferred'))
+    expect(ruleIds(computeFlags(patient, flagged, []), 'neg.')).toEqual(['neg.plan.unclear'])
+    expect(ruleIds(computeFlags(patient, withDoc((d) => (d.history.hpi.text = 'Not unwell')), []), 'neg.')).toEqual([
+      'neg.history.hpi.unclear'
+    ])
+    expect(ruleIds(computeFlags(patient, withDoc((d) => (d.plan.text = 'no pain not relieved by rest')), []), 'neg.')).toEqual([
+      'neg.plan.unclear'
+    ])
+    const clean = withDoc((d) => {
+      d.assessment.text = 'No evidence of disease on CT'
+      d.plan.text = 'Not tolerating oral intake, admit. Not until next week'
+    })
+    expect(ruleIds(computeFlags(patient, clean, []), 'neg.')).toEqual([])
+  })
+
+  it('flags a conversation where a symptom is denied in one segment and affirmed in another', () => {
+    const t: Transcript = {
+      ...conversation(),
+      segments: [
+        { id: 's1', startMs: 0, endMs: 1, originalText: '', text: 'No vomiting since admission', speaker: 'patient', speakerUncertain: false, warning: '' },
+        { id: 's2', startMs: 1, endMs: 2, originalText: '', text: 'vomiting yesterday once', speaker: 'patient', speakerUncertain: false, warning: '' }
+      ]
+    }
+    const vomit = DEFAULT_SETTINGS.toxicityChecklist.indexOf('Nausea / vomiting')
+    expect(vomit).toBeGreaterThanOrEqual(0)
+    const doc = emptyDocument(DEFAULT_SETTINGS, '2026-10-21T10:00')
+    const flags = computeFlags(patient, doc, [t])
+    const id = `tx.t1.contradiction.${doc.oncology.toxicities[vomit].id}`
+    expect(ids(flags)).toContain(id)
+    expect(flags.find((f) => f.id === id)?.severity).toBe('warning')
+  })
+
+  it('does not flag a conversation that only repeats one side, or questions', () => {
+    const t: Transcript = {
+      ...conversation(),
+      segments: [
+        { id: 's1', startMs: 0, endMs: 1, originalText: '', text: 'Any vomiting?', speaker: 'doctor', speakerUncertain: false, warning: '' },
+        { id: 's2', startMs: 1, endMs: 2, originalText: '', text: 'No', speaker: 'patient', speakerUncertain: false, warning: '' }
+      ]
+    }
+    const doc = emptyDocument(DEFAULT_SETTINGS, '2026-10-21T10:00')
+    expect(ruleIds(computeFlags(patient, doc, [t]), 'tx.t1.contradiction.')).toEqual([])
+  })
+})
+
+describe('clinic-required fields', () => {
+  it('blocks verification while a required section is empty', () => {
+    const doc = withDoc((d) => (d.history.hpi.text = '   '))
+    const flags = computeFlags(patient, doc, [], [], ['history.hpi'])
+    const flag = flags.find((f) => f.id === 'required.history.hpi')
+    expect(flag?.severity).toBe('blocking')
+    expect(flag?.message).toBe('History of present illness is required by the clinic')
+    expect(canVerify(flags, acks(flags))).toBe(false)
+  })
+
+  it('does not block once the required section has text', () => {
+    const doc = withDoc((d) => (d.plan.text = 'Continue; review'))
+    const flags = computeFlags(patient, doc, [], [], ['plan'])
+    expect(ids(flags).some((id) => id.startsWith('required.'))).toBe(false)
+  })
+
+  it('adds nothing when no fields are required, and ignores unknown keys', () => {
+    const doc = emptyDocument(DEFAULT_SETTINGS, '2026-10-21T10:00')
+    expect(ids(computeFlags(patient, doc, []))).not.toEqual(expect.arrayContaining([expect.stringMatching(/^required\./)]))
+    expect(() => computeFlags(patient, doc, [], [], ['nope' as never])).not.toThrow()
+  })
+})
+
+describe('common clinical text', () => {
+  it('stays free of the new warnings', () => {
+    const doc = withDoc((d) => {
+      d.history.chiefComplaints.text = 'Fever for 2 days, no cough'
+      d.history.hpi.text = 'Denies nausea, vomiting. Pain abdomen since 3 days, improving. Weight stable.'
+      d.examination.text = 'Pallor +. No pedal edema. Right lung clear. Scar healed.'
+      d.assessment.text = 'Febrile neutropenia resolving. Stable on TPF.'
+      d.plan.text = 'Continue regimen. Review with reports. ECG on 2026-11-02.'
+      d.prescription.followUp.text = 'Review on 2026-11-02 with CBC'
+      d.oncology.lastTreatmentDate = '2026-10-01'
+      d.oncology.nextPlannedTreatment = 'C4 D1 on 2026-11-02'
+      d.prescription.medications.push(
+        med('m1', 'Ondansetron'),
+        { ...med('m2', 'Paracetamol'), dose: '500 mg', frequency: '1-0-1', duration: '3 days', quantity: '6' }
+      )
+      d.oncology.toxicities.find((f) => f.name === 'Nausea / vomiting')!.state = 'absent'
+    })
+    const newRules = ['rx.', 'date.', 'lat.', 'contra.', 'neg.', 'required.']
+    const found = computeFlags(patient, doc, []).filter((f) => newRules.some((p) => f.id.startsWith(p)) && f.id !== 'rx.m1.incomplete')
+    expect(found.map((f) => f.id)).toEqual([])
   })
 })

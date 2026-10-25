@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { call } from '../api'
 import type { AsrCheck, PreviewResult } from '../../../shared/api'
 import type { AppSettings, AuditEntry, LayoutSettings, Role, User } from '../../../shared/types'
+import { SECTION_TARGETS, type SectionKey } from '../../../shared/sections'
 import { Area, ErrorBox, Field, Modal, Select, fmtDateTime, useAction } from '../components/ui'
 import { PdfPreview } from '../components/PdfPreview'
 import { FormatSection } from './FormatEditor'
@@ -77,6 +78,7 @@ function ClinicSection({ settings, save, busy }: SectionProps): ReactNode {
   const [tox, setTox] = useState(settings.toxicityChecklist.join('\n'))
   const [sym, setSym] = useState(settings.symptomChecklist.join('\n'))
   const [formulary, setFormulary] = useState(settings.formulary.join('\n'))
+  const [required, setRequired] = useState<SectionKey[]>(settings.requiredFields)
   const [lockMin, setLockMin] = useState(String(settings.autoLockMinutes))
   const [retain, setRetain] = useState(settings.retainAudio)
   return (
@@ -94,6 +96,18 @@ function ClinicSection({ settings, save, busy }: SectionProps): ReactNode {
       <h3>Clinic formulary</h3>
       <p className="muted small">Used only to flag possible misspellings. Leave empty to turn off.</p>
       <Area label="Clinic formulary (one medicine per line)" rows={8} value={formulary} onChange={setFormulary} />
+      <h3>Required before verification</h3>
+      <p className="muted small">A visit cannot be verified until every checked section has text.</p>
+      {SECTION_TARGETS.map(([key, label]) => (
+        <label key={key} className="check">
+          <input
+            type="checkbox"
+            checked={required.includes(key)}
+            onChange={(e) => setRequired(SECTION_TARGETS.map(([k]) => k).filter((k) => (k === key ? e.target.checked : required.includes(k))))}
+          />
+          {label}
+        </label>
+      ))}
       <h3>Privacy</h3>
       <Field label="Auto-lock after idle minutes (0 = off)" type="number" width={260} value={lockMin} onChange={setLockMin} />
       <label className="check">
@@ -110,6 +124,7 @@ function ClinicSection({ settings, save, busy }: SectionProps): ReactNode {
               toxicityChecklist: lines(tox),
               symptomChecklist: lines(sym),
               formulary: lines(formulary),
+              requiredFields: required,
               autoLockMinutes: Math.max(0, Math.floor(Number(lockMin) || 0)),
               retainAudio: retain
             })

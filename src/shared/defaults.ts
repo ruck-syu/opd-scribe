@@ -82,6 +82,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   toxicityChecklist: DEFAULT_TOXICITIES,
   symptomChecklist: DEFAULT_SYMPTOMS,
   formulary: [],
+  requiredFields: [],
   letterheadType: '',
   formats: { note: null, prescription: null }
 }
