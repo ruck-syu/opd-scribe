@@ -6,8 +6,9 @@ import { join } from 'node:path'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiMap, Channel } from '../shared/api'
+import type { Suggestion } from '../shared/extract'
 import { uid } from '../shared/defaults'
-import type { Encounter, Patient, ReviewFlag, Revision, Transcript, User, VisitDocument } from '../shared/types'
+import type { Encounter, Patient, ReviewFlag, Revision, Transcript, TranscriptSegment, User, VisitDocument } from '../shared/types'
 import { Store } from './db'
 import { Services, type Platform } from './services'
 
@@ -542,3 +543,104 @@ describe('consultation recording consent', () => {
   })
 })
 
+describe('transcript suggestions', () => {
+  const seg = (id: string, text: string): TranscriptSegment => ({
+    id,
+    startMs: 0,
+    endMs: 1000,
+    originalText: text,
+    text,
+    speaker: 'doctor',
+    speakerUncertain: false,
+    warning: ''
+  })
+
+  /** A ready conversation (inserted directly, as the engine would) for a visit with one formulary medicine. */
+  async function visitWithTranscript(): Promise<{ patient: Patient; encounter: Encounter; t: Transcript }> {
+    const { patient, encounter } = await startSession()
+    await call(h.handlers, 'settings.update', { formulary: ['Ondansetron'] })
+    const t = h.store.saveTranscript({
+      id: uid(),
+      encounterId: encounter.id,
+      kind: 'conversation',
+      section: null,
+      createdAt: new Date().toISOString(),
+      durationMs: 60000,
+      status: 'ready',
+      error: '',
+      reviewed: false,
+      audioRetained: false,
+      segments: [seg('s1', 'BP 130/80, ECOG 1'), seg('s2', 'Tab Ondansetron 8 mg TDS for 3 days')]
+    })
+    return { patient, encounter, t }
+  }
+
+  const decide = (patientId: string, transcriptId: string, suggestionId: string, status: 'accepted' | 'dismissed'): Promise<Transcript> =>
+    call(h.handlers, 'transcripts.decideSuggestion', transcriptId, patientId, suggestionId, status)
+
+  it('extracts pending suggestions on save and ignores suggestions sent by the client', async () => {
+    const { patient, t } = await visitWithTranscript()
+    const forged = { id: 'forged', status: 'accepted' } as Suggestion
+    const saved = await call(h.handlers, 'transcripts.save', { ...t, suggestions: [forged] }, patient.id)
+    const sugs = saved.suggestions ?? []
+    expect(sugs.length).toBeGreaterThan(0)
+    expect(sugs.every((s) => s.status === 'pending')).toBe(true)
+    expect(sugs.some((s) => s.id === 'forged')).toBe(false)
+    expect(sugs.find((s) => s.target.kind === 'vital' && s.target.key === 'bp')?.value).toBe('130/80')
+    expect(sugs.find((s) => s.target.kind === 'ecog')?.value).toBe('1')
+    expect(sugs.find((s) => s.target.kind === 'medication')).toBeDefined()
+  })
+
+  it('keeps decisions when an unrelated segment is edited and refuses unknown or repeated decisions', async () => {
+    const { patient, encounter, t } = await visitWithTranscript()
+    const first = await call(h.handlers, 'transcripts.save', t, patient.id)
+    const bp = first.suggestions!.find((s) => s.target.kind === 'vital' && s.target.key === 'bp')!
+    const ecog = first.suggestions!.find((s) => s.target.kind === 'ecog')!
+    const med = first.suggestions!.find((s) => s.target.kind === 'medication')!
+
+    const afterAccept = await decide(patient.id, t.id, bp.id, 'accepted')
+    expect(afterAccept.suggestions?.find((s) => s.id === bp.id)?.status).toBe('accepted')
+    await decide(patient.id, t.id, ecog.id, 'dismissed')
+
+    // only the medicine segment changes; the BP and ECOG decisions must survive
+    const edited = {
+      ...first,
+      segments: first.segments.map((x) => (x.id === 's2' ? { ...x, text: 'Tab Ondansetron 8 mg TDS for 5 days' } : x))
+    }
+    const next = await call(h.handlers, 'transcripts.save', edited, patient.id)
+    expect(next.suggestions?.find((s) => s.id === bp.id)?.status).toBe('accepted')
+    expect(next.suggestions?.find((s) => s.id === ecog.id)?.status).toBe('dismissed')
+    expect(next.suggestions?.find((s) => s.id === med.id)).toBeUndefined()
+    expect(next.suggestions?.find((s) => s.target.kind === 'medication')?.status).toBe('pending')
+
+    const stored = (await call(h.handlers, 'transcripts.list', encounter.id, patient.id))[0]
+    expect(stored.suggestions?.find((s) => s.id === bp.id)?.status).toBe('accepted')
+
+    await expect(decide(patient.id, t.id, 'no-such-id', 'accepted')).rejects.toThrow(/Suggestion not found/)
+    await expect(decide(patient.id, t.id, bp.id, 'dismissed')).rejects.toThrow(/already accepted or dismissed/)
+
+    const entry = (await call(h.handlers, 'audit.list', 1000)).find((e) => e.action === 'suggestion.accept')
+    expect(entry?.entity).toBe('transcript')
+    expect(entry?.entityId).toBe(t.id)
+    expect(entry?.detail).toBe('vital')
+    expect(JSON.stringify(entry)).not.toContain('130/80')
+  })
+
+  it('refuses decisions on a verified visit and for a patient who does not own the visit', async () => {
+    const { patient, encounter, t } = await visitWithTranscript()
+    const first = await call(h.handlers, 'transcripts.save', t, patient.id)
+    const bp = first.suggestions!.find((s) => s.target.kind === 'vital' && s.target.key === 'bp')!
+
+    const other = await createPatient('OTHER-SUG', 'Other Patient')
+    await expect(decide(other.id, t.id, bp.id, 'accepted')).rejects.toThrow(/Patient \/ visit mismatch/)
+
+    // the pending suggestion warning is acknowledged like any other warning
+    const doc = await acknowledgedDoc(encounter, patient, fillClinical(encounter.document))
+    await save(encounter, patient, doc)
+    await verify(encounter, patient)
+
+    await expect(decide(patient.id, t.id, bp.id, 'accepted')).rejects.toThrow(/Verified visit is locked/)
+    const stored = (await call(h.handlers, 'transcripts.list', encounter.id, patient.id))[0]
+    expect(stored.suggestions?.find((s) => s.id === bp.id)?.status).toBe('pending')
+  })
+})

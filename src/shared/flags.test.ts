@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { canVerify, computeFlags } from './flags'
 import { DEFAULT_SETTINGS, emptyDocument } from './defaults'
+import type { Suggestion } from './extract'
 import type { Finding, Medication, Patient, Transcript, VisitDocument } from './types'
 
 const patient: Patient = {
@@ -494,5 +495,47 @@ describe('common clinical text', () => {
     const newRules = ['rx.', 'date.', 'lat.', 'contra.', 'neg.', 'required.']
     const found = computeFlags(patient, doc, []).filter((f) => newRules.some((p) => f.id.startsWith(p)) && f.id !== 'rx.m1.incomplete')
     expect(found.map((f) => f.id)).toEqual([])
+  })
+})
+
+describe('undecided suggestions', () => {
+  const suggestion = (id: string, status: Suggestion['status']): Suggestion => ({
+    id,
+    transcriptId: 't1',
+    segmentIds: ['s1'],
+    target: { kind: 'vital', key: 'bp' },
+    value: '130/80',
+    quote: 'BP 130/80',
+    engine: 'rules',
+    status,
+    warning: ''
+  })
+  const doc = (): VisitDocument => emptyDocument(DEFAULT_SETTINGS, '2026-10-21T10:00')
+
+  it('warns with the sorted pending ids and ignores accepted and dismissed ones', () => {
+    const t: Transcript = {
+      ...conversation(),
+      suggestions: [suggestion('b', 'pending'), suggestion('c', 'accepted'), suggestion('a', 'pending'), suggestion('d', 'dismissed')]
+    }
+    const flag = computeFlags(patient, doc(), [t]).find((f) => f.id === 'tx.t1.suggestions')
+    expect(flag?.severity).toBe('warning')
+    expect(flag?.area).toBe('transcript')
+    expect(flag?.message).toBe('Conversation transcript has 2 suggestion(s) not yet accepted or dismissed')
+    expect(flag?.ackKey).toBe(
+      computeFlags(patient, doc(), [{ ...t, suggestions: [suggestion('a', 'pending'), suggestion('b', 'pending')] }]).find(
+        (f) => f.id === 'tx.t1.suggestions'
+      )?.ackKey
+    )
+  })
+
+  it('changes the acknowledgement key when the set of pending suggestions changes', () => {
+    const key = (s: Suggestion[]): string | undefined =>
+      computeFlags(patient, doc(), [{ ...conversation(), suggestions: s }]).find((f) => f.id === 'tx.t1.suggestions')?.ackKey
+    expect(key([suggestion('a', 'pending')])).not.toBe(key([suggestion('a', 'pending'), suggestion('b', 'pending')]))
+  })
+
+  it('adds no flag once every suggestion is decided', () => {
+    const t: Transcript = { ...conversation(), suggestions: [suggestion('a', 'accepted'), suggestion('b', 'dismissed')] }
+    expect(ids(computeFlags(patient, doc(), [t]))).not.toContain('tx.t1.suggestions')
   })
 })

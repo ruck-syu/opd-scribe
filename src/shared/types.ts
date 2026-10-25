@@ -1,6 +1,7 @@
 // Shared domain types used by main, preload and renderer.
 // Schema rule (PRD §6.2): empty strings / nulls / 'not_assessed' are NEVER clinical negatives.
 
+import type { Suggestion } from './extract'
 import type { FormatSettings } from './formTemplate'
 import type { SectionKey } from './sections'
 
@@ -190,6 +191,10 @@ export interface Transcript {
   /** doctor confirmed the transcript was reviewed */
   reviewed: boolean
   audioRetained: boolean
+  /** proposed field values from the transcript; each enters the note only when accepted */
+  suggestions?: Suggestion[]
+  /** candidates that were not backed by the transcript, kept visible instead of dropped */
+  rejectedSuggestions?: { quote: string; value: string; reason: string }[]
 }
 
 // ---------- Encounters, revisions, verification ----------

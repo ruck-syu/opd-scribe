@@ -129,6 +129,13 @@ export interface ApiMap {
   'transcripts.retry': (transcriptId: string, encounterId: string, patientId: string) => Transcript
   'transcripts.save': (transcript: Transcript, patientId: string) => Transcript
   'transcripts.delete': (transcriptId: string, encounterId: string, patientId: string) => void
+  /** the doctor's decision on one suggestion; decisions are final (no undo) */
+  'transcripts.decideSuggestion': (
+    transcriptId: string,
+    patientId: string,
+    suggestionId: string,
+    status: 'accepted' | 'dismissed'
+  ) => Transcript
 
   'review.flags': (encounterId: string, patientId: string) => ReviewFlag[]
   'review.preview': (encounterId: string, patientId: string) => PreviewResult
@@ -188,6 +195,7 @@ export const CHANNELS = [
   'transcripts.retry',
   'transcripts.save',
   'transcripts.delete',
+  'transcripts.decideSuggestion',
   'review.flags',
   'review.preview',
   'review.previewRevision',

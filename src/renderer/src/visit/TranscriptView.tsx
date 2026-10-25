@@ -3,6 +3,7 @@ import { call, errMsg } from '../api'
 import { SECTION_TARGETS, appendToSection, segmentsText, type SectionKey } from '../../../shared/sections'
 import type { Speaker, Transcript } from '../../../shared/types'
 import { fmtDuration } from '../components/ui'
+import { SuggestionsPanel } from './SuggestionsPanel'
 import type { VisitCtx } from './Visit'
 
 const SPEAKERS: [Speaker, string][] = [
@@ -29,13 +30,23 @@ export function TranscriptView(props: { ctx: VisitCtx; transcript: Transcript; d
     latest.current = props.transcript
   }, [props.transcript])
 
+  // Takes only the suggestion fields: segment text typed since the last save must not be overwritten.
+  const adoptSuggestions = (saved: Transcript): void => {
+    const next = { ...latest.current, suggestions: saved.suggestions, rejectedSuggestions: saved.rejectedSuggestions }
+    setT(next)
+    latest.current = next
+  }
+
   const persist = (next: Transcript, immediate = false): void => {
     setT(next)
     latest.current = next
     if (saveTimer.current) clearTimeout(saveTimer.current)
     const go = (): void =>
       void call('transcripts.save', latest.current, ctx.patientId)
-        .then(() => setError(''))
+        .then((saved) => {
+          setError('')
+          adoptSuggestions(saved)
+        })
         .catch((e) => setError(errMsg(e)))
     if (immediate) go()
     else saveTimer.current = setTimeout(go, 600)
@@ -117,6 +128,9 @@ export function TranscriptView(props: { ctx: VisitCtx; transcript: Transcript; d
       </div>
       {open && (
         <>
+          {(t.kind === 'conversation' || !!t.suggestions?.length || !!t.rejectedSuggestions?.length) && (
+            <SuggestionsPanel ctx={ctx} transcript={t} onChange={adoptSuggestions} />
+          )}
           <div className="segments">
             {t.segments.map((s) => (
               <div key={s.id} className={`segment ${s.warning ? 'has-warning' : ''} sp-${s.speaker}`}>

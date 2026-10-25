@@ -22,7 +22,7 @@ export function ConversationTab({ ctx }: { ctx: VisitCtx }): ReactNode {
       <div className="card">
         <p className="muted small">
           Speakers are not detected automatically — label each segment (select several and use “Label as”). Nothing is
-          added to the note until you insert it.
+          added to the note until a suggestion is accepted or text is inserted.
         </p>
         <RecorderPanel
           encounterId={ctx.encounterId}

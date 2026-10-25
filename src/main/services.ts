@@ -5,6 +5,7 @@ import { PDFDocument } from 'pdf-lib'
 import type { ApiMap, Channel, PreviewResult } from '../shared/api'
 import { canonicalJson, clinicalContent } from '../shared/canonical'
 import { emptyDocument, uid } from '../shared/defaults'
+import { extractRules, verifySuggestion, type Suggestion } from '../shared/extract'
 import { canVerify, computeFlags } from '../shared/flags'
 import { renderFormBodyHtml, renderFieldsOverlayHtml, sampleSnapshot } from '../shared/formRender'
 import { A4_MM, validateTemplate, type DocKind, type FormTemplate } from '../shared/formTemplate'
@@ -267,6 +268,34 @@ export class Services {
 
   // ---------- transcription ----------
 
+  /**
+   * Re-runs rule extraction over a ready transcript. A suggestion with the same id keeps its decision,
+   * an accepted one stays even when it no longer appears, and a failure here never fails the caller.
+   */
+  private withSuggestions(next: Transcript, prev: Transcript): Transcript {
+    const settings = this.store.getSettings()
+    let fresh: Suggestion[] = []
+    let rejected: NonNullable<Transcript['rejectedSuggestions']> = []
+    try {
+      const result = extractRules(next, {
+        symptoms: settings.symptomChecklist,
+        toxicities: settings.toxicityChecklist,
+        formulary: settings.formulary
+      })
+      fresh = result.suggestions
+      rejected = result.rejected.map((r) => ({ quote: r.suggestion.quote, value: r.suggestion.value, reason: r.reason }))
+    } catch (e) {
+      // error class only: messages can quote the transcript
+      console.error('[suggestions] extraction failed:', e instanceof Error ? e.name : 'error')
+    }
+    const prior = prev.suggestions ?? []
+    const priorById = new Map(prior.map((x) => [x.id, x]))
+    const freshIds = new Set(fresh.map((x) => x.id))
+    const merged = fresh.map((x) => ({ ...x, status: priorById.get(x.id)?.status ?? x.status }))
+    const kept = prior.filter((x) => x.status === 'accepted' && !freshIds.has(x.id))
+    return { ...next, suggestions: [...merged, ...kept], rejectedSuggestions: rejected }
+  }
+
   private startTranscription(t: Transcript): void {
     const settings = this.store.getSettings()
     const wav = readEncrypted(this.key, this.audioPath(t.id))
@@ -282,7 +311,7 @@ export class Services {
       }
     })
       .then((segments) => {
-        this.store.saveTranscript({ ...t, status: 'ready', error: '', segments })
+        this.store.saveTranscript(this.withSuggestions({ ...t, status: 'ready', error: '', segments }, t))
         this.store.audit('system', 'transcript.ready', 'transcript', t.id, `segments=${segments.length}`)
       })
       .catch((e: unknown) => {
@@ -629,7 +658,7 @@ export class Services {
           audioRetained = false
           this.audit('audio.delete', 'transcript', cur.id, 'after review')
         }
-        return s.saveTranscript({ ...cur, segments, reviewed: t.reviewed, audioRetained })
+        return s.saveTranscript(this.withSuggestions({ ...cur, segments, reviewed: t.reviewed, audioRetained }, cur))
       },
       'transcripts.delete': (transcriptId, encounterId, patientId) => {
         this.requireUser()
@@ -640,6 +669,23 @@ export class Services {
         rmSync(this.audioPath(t.id), { force: true })
         s.deleteTranscript(t.id)
         this.audit('transcript.delete', 'transcript', t.id)
+      },
+      'transcripts.decideSuggestion': (transcriptId, patientId, suggestionId, status) => {
+        this.requireUser()
+        const t = s.getTranscript(transcriptId) ?? fail('Transcript not found')
+        const e = this.encounterFor(t.encounterId, patientId)
+        if (e.status === 'verified' || e.status === 'amended') fail('Verified visit is locked')
+        const list = t.suggestions ?? []
+        const cur = list.find((x) => x.id === suggestionId) ?? fail('Suggestion not found')
+        if (cur.status === status) return t
+        if (cur.status !== 'pending') fail('Suggestion was already accepted or dismissed')
+        if (status === 'accepted') {
+          if (!cur.value) fail('A conflicting statement can only be dismissed')
+          if (!verifySuggestion(cur, t).ok) fail('Suggestion no longer matches the transcript — dismiss it')
+        }
+        const next = s.saveTranscript({ ...t, suggestions: list.map((x) => (x.id === suggestionId ? { ...x, status } : x)) })
+        this.audit(status === 'accepted' ? 'suggestion.accept' : 'suggestion.dismiss', 'transcript', t.id, cur.target.kind)
+        return next
       },
 
       'review.flags': (encounterId, patientId) => {

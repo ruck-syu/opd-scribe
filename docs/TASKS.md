@@ -29,6 +29,14 @@ Status: MVP built, `release/OPD Scribe Setup 0.1.0.exe` produced. Typecheck clea
 - [x] Microphone unplugged mid-recording: stops, keeps and submits what was captured.
 - [x] PDF stress test (25 medications, 14-paragraph HPI, Indic scripts, unbroken tokens): no text lost. Fixed: long tokens shrank the whole page; page stamp wrapped below the margin and turned accented names into `?`.
 
+## Record-first workflow
+- [x] Rule-based suggestions from the transcript (vitals, ECOG, cycle/day, regimen, checklist findings, formulary medicines, note sections), each with its verbatim quote; anything not backed by the quote is rejected and listed, never applied.
+- [x] Suggestion review panel: accept / dismiss, accept-all for rows without warnings, never overwrites a field, "Not mentioned — fill manually" list; pending suggestions are a review warning.
+- [x] P0 flags: ambiguous medication numbers, relative dates, mixed laterality, finding/text contradictions, double negatives, transcript contradictions; clinic-required sections (Settings › Clinic).
+- [ ] Local LLM extractor (llama.cpp sidecar, one-time model download) behind the same quote gate, for history, assessment and full prescription lines.
+- [ ] "Today's patients" list for one-click start.
+- [ ] Laterality check against the oncology summary (needs the summary passed into the flag check).
+
 ## Later
 - [ ] Chunked live transcription during the visit (today: transcribe after stopping).
 - [ ] Speaker diarisation (today: segments are unlabelled until the doctor labels them).

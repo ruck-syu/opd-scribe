@@ -665,6 +665,79 @@ table {
   width: auto;
 }
 
+/* ---------- suggestions from a transcript ---------- */
+.suggestions {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+.sug-head,
+.sug-group-head,
+.sug-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sug-group {
+  margin-top: 10px;
+}
+.suggestion {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  margin-top: 4px;
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+}
+.suggestion.has-warning {
+  background: var(--warn-soft);
+  border-left-color: var(--warn);
+}
+.sug-main {
+  flex: 1;
+  min-width: 0;
+}
+.sug-value {
+  margin-left: 8px;
+  white-space: pre-wrap;
+}
+.sug-quote {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.sug-warning {
+  color: var(--warn);
+}
+.sug-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.sug-done {
+  padding: 2px 8px;
+}
+.sug-med {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 2px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.sug-med i {
+  font-style: normal;
+  color: var(--muted);
+}
+.sug-rejected,
+.sug-manual {
+  margin-top: 10px;
+}
+.sug-rejected ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
 /* ---------- oncology summary ---------- */
 .summary-row {
   display: grid;

@@ -268,6 +268,14 @@ export function computeFlags(
         `${what} has ${warned.length} segment(s) flagged as possibly unreliable`,
         warned.map((s) => `${s.id}:${s.text}:${s.warning}`).join('|')
       )
+    const pending = (t.suggestions ?? []).filter((s) => s.status === 'pending').map((s) => s.id).sort()
+    if (pending.length)
+      warn(
+        `tx.${t.id}.suggestions`,
+        area,
+        `${what} has ${pending.length} suggestion(s) not yet accepted or dismissed`,
+        pending.join(',')
+      )
     if (t.kind === 'conversation') {
       // questions are not statements; a denial and an affirmation in different segments clash
       const segs = t.segments.filter((s) => !s.text.includes('?'))
