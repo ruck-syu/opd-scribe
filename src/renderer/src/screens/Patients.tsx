@@ -55,7 +55,7 @@ export function Patients({ open }: { open: (id: string) => void }): ReactNode {
               <td className="mono">{p.mrn}</td>
               <td>{p.name}</td>
               <td>{p.ageDisplay || p.dateOfBirth || '—'}</td>
-              <td>{p.sex || '—'}</td>
+              <td className="cap">{p.sex || '—'}</td>
               <td>{p.phone || '—'}</td>
             </tr>
           ))}

@@ -43,7 +43,7 @@ export function GettingReady({ onDone }: { onDone: () => void }): ReactNode {
 
   return (
     <div className="center">
-      <div className="card narrow getting-ready">
+      <div className="card narrow gate getting-ready">
         <h2>Getting ready</h2>
         <p>OPD Scribe needs a few files before it can listen to consultations and help with notes.</p>
         <p className="muted small">This happens once. After this, OPD Scribe works without internet. No patient information is sent.</p>

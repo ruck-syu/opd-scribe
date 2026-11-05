@@ -176,3 +176,15 @@ export function fmtDuration(ms: number): string {
   const s = Math.floor(ms / 1000)
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
+
+/** The app icon, simplified: a note sheet with a marigold recording dot. */
+export function BrandMark(): ReactNode {
+  return (
+    <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="8" fill="#0D5560" />
+      <path d="M10 7h8l5 5v11.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 9 23.5v-15A1.5 1.5 0 0 1 10.5 7Z" fill="#fff" />
+      <path d="M12 13h6M12 16h8M12 19h5" stroke="#9FC7CB" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="22.5" cy="22.5" r="4.5" fill="#E3A21A" stroke="#0D5560" strokeWidth="1.5" />
+    </svg>
+  )
+}

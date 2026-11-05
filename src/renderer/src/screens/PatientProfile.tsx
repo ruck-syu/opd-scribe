@@ -47,8 +47,20 @@ export function PatientProfile(props: {
         <div>
           <div className="id-name">{patient.name}</div>
           <div className="id-meta">
-            MRN <b className="mono">{patient.mrn}</b> · {patient.ageDisplay || patient.dateOfBirth || 'Age not recorded'} ·{' '}
-            {patient.sex || 'Sex not recorded'} {patient.phone && `· ${patient.phone}`}
+            <span>
+              <i>MRN</i> <b className="mono">{patient.mrn}</b>
+            </span>
+            <span>
+              <i>Age</i> {patient.ageDisplay || patient.dateOfBirth || 'Not recorded'}
+            </span>
+            <span>
+              <i>Sex</i> <span className="cap">{patient.sex || 'Not recorded'}</span>
+            </span>
+            {patient.phone && (
+              <span>
+                <i>Phone</i> <b className="mono">{patient.phone}</b>
+              </span>
+            )}
           </div>
         </div>
         <div className="spacer" />

@@ -123,8 +123,15 @@ export function Visit(props: { patientId: string; encounterId: string; user: Use
         <div>
           <div className="id-name">{patient.name}</div>
           <div className="id-meta">
-            MRN <b className="mono">{patient.mrn}</b> · {patient.ageDisplay || patient.dateOfBirth || 'Age not recorded'} ·{' '}
-            {patient.sex || 'Sex not recorded'}
+            <span>
+              <i>MRN</i> <b className="mono">{patient.mrn}</b>
+            </span>
+            <span>
+              <i>Age</i> {patient.ageDisplay || patient.dateOfBirth || 'Not recorded'}
+            </span>
+            <span>
+              <i>Sex</i> <span className="cap">{patient.sex || 'Not recorded'}</span>
+            </span>
           </div>
         </div>
         <div className="row tight">
@@ -146,16 +153,18 @@ export function Visit(props: { patientId: string; encounterId: string; user: Use
       {saveState === 'error' && <div className="error">Could not save: {saveError}</div>}
       {enc.status === 'amending' && <div className="notice">Amending verified visit — reason: {enc.amendmentReason}</div>}
 
-      <nav className="tabs">
-        {TABS.map(([k, l]) => (
+      <nav className="tabs steps" aria-label="Visit steps">
+        {TABS.map(([k, l], i) => (
           <button
             key={k}
             className={tab === k ? 'active' : ''}
+            aria-current={tab === k ? 'step' : undefined}
             onClick={async () => {
               await flush()
               setTab(k)
             }}
           >
+            <span className="step-n">{i + 1}</span>
             {l}
           </button>
         ))}

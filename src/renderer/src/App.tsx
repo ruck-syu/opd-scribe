@@ -9,6 +9,7 @@ import { Patients } from './screens/Patients'
 import { PatientProfile } from './screens/PatientProfile'
 import { Settings } from './screens/Settings'
 import { Visit } from './visit/Visit'
+import { BrandMark } from './components/ui'
 
 export type Route =
   | { screen: 'patients' }
@@ -54,26 +55,46 @@ export function App(): ReactNode {
 
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="brand" onClick={() => setRoute({ screen: 'patients' })}>
-          OPD Scribe
-        </div>
-        <nav>
-          <button className={route.screen === 'patients' ? 'active' : ''} onClick={() => setRoute({ screen: 'patients' })}>
+      <aside className="rail">
+        <button className="brand" onClick={() => setRoute({ screen: 'patients' })} aria-label="OPD Scribe, go to patients">
+          <BrandMark />
+          <span>
+            OPD Scribe
+            <small>Offline on this computer</small>
+          </span>
+        </button>
+        <nav className="rail-nav">
+          <button
+            className={route.screen !== 'settings' ? 'active' : ''}
+            aria-current={route.screen !== 'settings' ? 'page' : undefined}
+            onClick={() => setRoute({ screen: 'patients' })}
+          >
             Patients
           </button>
           {user.role === 'doctor' && (
-            <button className={route.screen === 'settings' ? 'active' : ''} onClick={() => setRoute({ screen: 'settings' })}>
+            <button
+              className={route.screen === 'settings' ? 'active' : ''}
+              aria-current={route.screen === 'settings' ? 'page' : undefined}
+              onClick={() => setRoute({ screen: 'settings' })}
+            >
               Settings
             </button>
           )}
         </nav>
         <div className="spacer" />
-        <span className="muted">
-          {user.name} · {user.role}
-        </span>
-        <button onClick={lock}>Lock</button>
-      </header>
+        <div className="rail-user">
+          <span className="avatar" aria-hidden="true">
+            {initials(user.name)}
+          </span>
+          <span className="rail-user-name">
+            {user.name}
+            <small>{user.role === 'doctor' ? 'Doctor' : 'Staff'}</small>
+          </span>
+        </div>
+        <button className="rail-lock" onClick={lock}>
+          Lock screen
+        </button>
+      </aside>
       <main className="content">
         {route.screen === 'patients' && <Patients open={(patientId) => setRoute({ screen: 'patient', patientId })} />}
         {route.screen === 'patient' && (
@@ -98,6 +119,14 @@ export function App(): ReactNode {
       </main>
     </div>
   )
+}
+
+function initials(name: string): string {
+  const parts = name
+    .replace(/^(dr\.?|mr\.?|mrs\.?|ms\.?)\s+/i, '')
+    .split(/\s+/)
+    .filter(Boolean)
+  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
 }
 
 /** Lock after N idle minutes (SEC: auto-lock). */

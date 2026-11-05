@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { call } from '../api'
-import { ErrorBox, Field, useAction } from '../components/ui'
+import { BrandMark, ErrorBox, Field, useAction } from '../components/ui'
 
 export function Setup({ onDone }: { onDone: () => void }): ReactNode {
   const [clinicName, setClinicName] = useState('')
@@ -23,13 +23,16 @@ export function Setup({ onDone }: { onDone: () => void }): ReactNode {
   return (
     <div className="center">
       <form
-        className="card narrow"
+        className="card narrow gate"
         onSubmit={(e) => {
           e.preventDefault()
           submit()
         }}
       >
-        <h2>Welcome to OPD Scribe</h2>
+        <div className="gate-head">
+          <BrandMark />
+          <h2>Set up OPD Scribe</h2>
+        </div>
         <p className="muted">
           First-time setup. All data stays on this computer, encrypted with a key protected by the operating system.
         </p>
@@ -45,7 +48,7 @@ export function Setup({ onDone }: { onDone: () => void }): ReactNode {
           <Field label="Confirm PIN" type="password" value={pin2} onChange={setPin2} required />
         </div>
         <ErrorBox error={error} />
-        <button className="primary" disabled={busy}>
+        <button className="primary block" disabled={busy}>
           Create & continue
         </button>
       </form>

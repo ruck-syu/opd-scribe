@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { call } from '../api'
 import type { User } from '../../../shared/types'
-import { ErrorBox, Field, useAction } from '../components/ui'
+import { BrandMark, ErrorBox, Field, useAction } from '../components/ui'
 
 export function LockScreen({ onUnlocked }: { onUnlocked: () => void }): ReactNode {
   const [users, setUsers] = useState<Pick<User, 'id' | 'name' | 'role'>[]>([])
@@ -19,7 +19,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }): ReactNod
   return (
     <div className="center">
       <form
-        className="card narrow"
+        className="card narrow gate"
         onSubmit={(e) => {
           e.preventDefault()
           void run(async () => {
@@ -28,7 +28,13 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }): ReactNod
           }).finally(() => setPin(''))
         }}
       >
-        <h2>OPD Scribe — locked</h2>
+        <div className="gate-head">
+          <BrandMark />
+          <div>
+            <h2>OPD Scribe is locked</h2>
+            <p className="muted small">Choose your name and enter your PIN.</p>
+          </div>
+        </div>
         <div className="user-pick">
           {users.map((u) => (
             <button type="button" key={u.id} className={u.id === userId ? 'on' : ''} onClick={() => setUserId(u.id)}>
@@ -39,7 +45,7 @@ export function LockScreen({ onUnlocked }: { onUnlocked: () => void }): ReactNod
         </div>
         <Field label="PIN" type="password" value={pin} onChange={setPin} autoFocus />
         <ErrorBox error={error} />
-        <button className="primary" disabled={busy || !userId || !pin}>
+        <button className="primary block" disabled={busy || !userId || !pin}>
           Unlock
         </button>
       </form>
