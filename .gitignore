@@ -9,3 +9,7 @@ resources/engines/
 .cache/
 models/
 release/
+
+# ASR benchmark: recordings are patient data, never commit them
+asr-bench-data/
+scripts/asr-bench/models.toml

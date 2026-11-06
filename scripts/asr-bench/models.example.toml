@@ -1,0 +1,49 @@
+# Copy to models.toml (git-ignored) and adjust paths. Set disabled = true to skip a model.
+# Backends: whispercpp (the app's engine), hf-whisper (any Whisper repo on Hugging Face), parrotlet (Eka Care).
+
+# 1. What the app ships today: whisper.cpp + large-v3-turbo q5_0, same arguments as src/main/asr.ts.
+[[model]]
+name = "large-v3-turbo q5_0 (current, whisper.cpp)"
+backend = "whispercpp"
+binary = "resources/engines/mac-arm64/whisper/whisper-cli"   # npm run engines -- --platform mac --arch arm64
+model = "~/Library/Application Support/OPD Scribe/models/ggml-large-v3-turbo-q5_0.bin"
+language = "hi"            # the app's default (Settings > Speech engine)
+prompt = ""                # try the same model with a drug-name prompt as a separate entry below
+
+# 1b. Same model, with an initial prompt listing common drug names. Cheap to try.
+[[model]]
+name = "large-v3-turbo q5_0 + drug prompt"
+backend = "whispercpp"
+binary = "resources/engines/mac-arm64/whisper/whisper-cli"
+model = "~/Library/Application Support/OPD Scribe/models/ggml-large-v3-turbo-q5_0.bin"
+language = "hi"
+prompt = "Oncology OPD. Paclitaxel, carboplatin, capecitabine, ondansetron, pantoprazole, dexamethasone, ECOG, CBC, PET-CT."
+
+# 2. Oriserve Apex, Hinglish (Roman script) fine-tune of large-v3-turbo. Official weights, Apache-2.0.
+[[model]]
+name = "Oriserve Hindi2Hinglish Apex (transformers)"
+backend = "hf-whisper"
+repo = "Oriserve/Whisper-Hindi2Hinglish-Apex"
+device = "auto"            # cuda > mps > cpu
+generate_kwargs = { task = "transcribe", language = "en" }   # as on the model card
+
+# 2b. The same model through whisper.cpp, i.e. how the app would actually run it. Needs a GGML
+#     conversion (docs/SPEECH_MODEL.md), or a third-party one; verify any third-party file first.
+[[model]]
+name = "Oriserve Hindi2Hinglish Apex (whisper.cpp)"
+backend = "whispercpp"
+binary = "resources/engines/mac-arm64/whisper/whisper-cli"
+model = "~/models/ggml-hinglish-apex-f16.bin"
+language = "en"
+disabled = true
+
+# 3. Eka Care Parrotlet-a 2.5 Pro: Whisper large-v3 encoder + MedGemma 4B decoder, ~5B params.
+#    Python-only (no whisper.cpp). Licence: Health AI Developer Foundations terms; read before product use.
+[[model]]
+name = "Eka Parrotlet-a 2.5 Pro"
+backend = "parrotlet"
+repo = "ekacare/parrotlet-a-2.5-pro"
+device = "auto"
+dtype = "bfloat16"         # float32 (as published) needs ~20 GB RAM; bfloat16 roughly halves it
+chunk_seconds = 28         # the model truncates input after 30 s; audio is cut at pauses below this
+max_new_tokens = 448

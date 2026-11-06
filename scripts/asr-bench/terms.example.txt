@@ -1,0 +1,24 @@
+# Terms whose recognition matters most. One per line: canonical|alias|alias
+# Matching ignores case and punctuation. A term counts as "expected" in a file when the reference
+# transcript contains it; it counts as "missed" when the model output does not (small spelling
+# slips are tolerated for names of 6+ letters). Add brand names your clinic actually prescribes.
+paclitaxel|paclitaxol|taxol
+carboplatin
+cisplatin
+capecitabine|xeloda
+oxaliplatin
+gemcitabine
+docetaxel
+trastuzumab|herceptin
+pembrolizumab|keytruda
+ondansetron|emeset|ondem
+pantoprazole|pan 40|pan-d
+dexamethasone|dexa
+filgrastim|neukine
+paracetamol|dolo|crocin|pcm
+ECOG
+CBC
+PET CT|PET-CT|petct
+neutropenia
+mucositis
+neuropathy
